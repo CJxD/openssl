@@ -82,9 +82,20 @@ typedef struct {
 /*
  * Returns the number of bytes remaining to be read in the PACKET
  */
-__owur static inline size_t PACKET_remaining(PACKET *pkt)
+__owur static inline size_t PACKET_remaining(const PACKET *pkt)
 {
     return (size_t)(pkt->end - pkt->curr);
+}
+
+/*
+ * Returns a pointer to the PACKET's current position.
+ * For use in non-PACKETized APIs.
+ * TODO(openssl-team): this should return 'const unsigned char*' but can't
+ * currently because legacy code passes 'unsigned char*'s around.
+ */
+static inline unsigned char *PACKET_data(const PACKET *pkt)
+{
+    return pkt->curr;
 }
 
 /*
@@ -113,8 +124,8 @@ static inline int PACKET_buf_init(PACKET *pkt, unsigned char *buf, size_t len)
  * Data is not copied: the |subpkt| packet will share its underlying buffer with
  * the original |pkt|, so data wrapped by |pkt| must outlive the |subpkt|.
  */
-__owur static inline int PACKET_peek_sub_packet(PACKET *pkt, PACKET *subpkt,
-                                               size_t len)
+__owur static inline int PACKET_peek_sub_packet(const PACKET *pkt,
+                                                PACKET *subpkt, size_t len)
 {
     if (PACKET_remaining(pkt) < len)
         return 0;
@@ -143,7 +154,8 @@ __owur static inline int PACKET_get_sub_packet(PACKET *pkt, PACKET *subpkt,
 /* Peek ahead at 2 bytes in network order from |pkt| and store the value in
  * |*data|
  */
-__owur static inline int PACKET_peek_net_2(PACKET *pkt, unsigned int *data)
+__owur static inline int PACKET_peek_net_2(const PACKET *pkt,
+                                           unsigned int *data)
 {
     if (PACKET_remaining(pkt) < 2)
         return 0;
@@ -169,7 +181,8 @@ __owur static inline int PACKET_get_net_2(PACKET *pkt, unsigned int *data)
 /* Peek ahead at 3 bytes in network order from |pkt| and store the value in
  * |*data|
  */
-__owur static inline int PACKET_peek_net_3(PACKET *pkt, unsigned long *data)
+__owur static inline int PACKET_peek_net_3(const PACKET *pkt,
+                                           unsigned long *data)
 {
     if (PACKET_remaining(pkt) < 3)
         return 0;
@@ -196,7 +209,8 @@ __owur static inline int PACKET_get_net_3(PACKET *pkt, unsigned long *data)
 /* Peek ahead at 4 bytes in network order from |pkt| and store the value in
  * |*data|
  */
-__owur static inline int PACKET_peek_net_4(PACKET *pkt, unsigned long *data)
+__owur static inline int PACKET_peek_net_4(const PACKET *pkt,
+                                           unsigned long *data)
 {
     if (PACKET_remaining(pkt) < 4)
         return 0;
@@ -222,7 +236,7 @@ __owur static inline int PACKET_get_net_4(PACKET *pkt, unsigned long *data)
 }
 
 /* Peek ahead at 1 byte from |pkt| and store the value in |*data| */
-__owur static inline int PACKET_peek_1(PACKET *pkt, unsigned int *data)
+__owur static inline int PACKET_peek_1(const PACKET *pkt, unsigned int *data)
 {
     if (!PACKET_remaining(pkt))
         return 0;
@@ -247,7 +261,7 @@ __owur static inline int PACKET_get_1(PACKET *pkt, unsigned int *data)
  * Peek ahead at 4 bytes in reverse network order from |pkt| and store the value
  * in |*data|
  */
-__owur static inline int PACKET_peek_4(PACKET *pkt, unsigned long *data)
+__owur static inline int PACKET_peek_4(const PACKET *pkt, unsigned long *data)
 {
     if (PACKET_remaining(pkt) < 4)
         return 0;
@@ -281,7 +295,7 @@ __owur static inline int PACKET_get_4(PACKET *pkt, unsigned long *data)
  * caller should not free this data directly (it will be freed when the
  * underlying buffer gets freed
  */
-__owur static inline int PACKET_peek_bytes(PACKET *pkt, unsigned char **data,
+__owur static inline int PACKET_peek_bytes(const PACKET *pkt, unsigned char **data,
                                           size_t len)
 {
     if (PACKET_remaining(pkt) < len)
@@ -310,7 +324,7 @@ __owur static inline int PACKET_get_bytes(PACKET *pkt, unsigned char **data,
 }
 
 /* Peek ahead at |len| bytes from |pkt| and copy them to |data| */
-__owur static inline int PACKET_peek_copy_bytes(PACKET *pkt,
+__owur static inline int PACKET_peek_copy_bytes(const PACKET *pkt,
                                                 unsigned char *data, size_t len)
 {
     if (PACKET_remaining(pkt) < len)
@@ -356,7 +370,7 @@ __owur static inline int PACKET_forward(PACKET *pkt, size_t len)
 }
 
 /* Store a bookmark for the current reading position in |*bm| */
-__owur static inline int PACKET_get_bookmark(PACKET *pkt, size_t *bm)
+__owur static inline int PACKET_get_bookmark(const PACKET *pkt, size_t *bm)
 {
     *bm = pkt->curr - pkt->start;
 
@@ -378,16 +392,86 @@ __owur static inline int PACKET_goto_bookmark(PACKET *pkt, size_t bm)
  * Stores the total length of the packet we have in the underlying buffer in
  * |*len|
  */
-__owur static inline int PACKET_length(PACKET *pkt, size_t *len)
+__owur static inline int PACKET_length(const PACKET *pkt, size_t *len)
 {
     *len = pkt->end - pkt->start;
 
     return 1;
 }
 
+/*
+ * Reads a variable-length vector prefixed with a one-byte length, and stores
+ * the contents in |subpkt|. |pkt| can equal |subpkt|.
+ * Data is not copied: the |subpkt| packet will share its underlying buffer with
+ * the original |pkt|, so data wrapped by |pkt| must outlive the |subpkt|.
+ * Upon failure, the original |pkt| and |subpkt| are not modified.
+ */
+__owur static inline int PACKET_get_length_prefixed_1(PACKET *pkt, PACKET *subpkt)
+{
+  unsigned int length;
+  unsigned char *data;
+  PACKET tmp = *pkt;
+  if (!PACKET_get_1(&tmp, &length) ||
+      !PACKET_get_bytes(&tmp, &data, (size_t)length)) {
+      return 0;
+  }
+
+  *pkt = tmp;
+  subpkt->start = subpkt->curr = data;
+  subpkt->end = subpkt->start + length;
+
+  return 1;
+}
+
+/*
+ * Reads a variable-length vector prefixed with a two-byte length, and stores
+ * the contents in |subpkt|. |pkt| can equal |subpkt|.
+ * Data is not copied: the |subpkt| packet will share its underlying buffer with
+ * the original |pkt|, so data wrapped by |pkt| must outlive the |subpkt|.
+ * Upon failure, the original |pkt| and |subpkt| are not modified.
+ */
+__owur static inline int PACKET_get_length_prefixed_2(PACKET *pkt, PACKET *subpkt)
+{
+  unsigned int length;
+  unsigned char *data;
+  PACKET tmp = *pkt;
+  if (!PACKET_get_net_2(&tmp, &length) ||
+      !PACKET_get_bytes(&tmp, &data, (size_t)length)) {
+      return 0;
+  }
+
+  *pkt = tmp;
+  subpkt->start = subpkt->curr = data;
+  subpkt->end = subpkt->start + length;
+
+  return 1;
+}
+
+/*
+ * Reads a variable-length vector prefixed with a three-byte length, and stores
+ * the contents in |subpkt|. |pkt| can equal |subpkt|.
+ * Data is not copied: the |subpkt| packet will share its underlying buffer with
+ * the original |pkt|, so data wrapped by |pkt| must outlive the |subpkt|.
+ * Upon failure, the original |pkt| and |subpkt| are not modified.
+ */
+__owur static inline int PACKET_get_length_prefixed_3(PACKET *pkt, PACKET *subpkt)
+{
+  unsigned long length;
+  unsigned char *data;
+  PACKET tmp = *pkt;
+  if (!PACKET_get_net_3(&tmp, &length) ||
+      !PACKET_get_bytes(&tmp, &data, (size_t)length)) {
+      return 0;
+  }
+
+  *pkt = tmp;
+  subpkt->start = subpkt->curr = data;
+  subpkt->end = subpkt->start + length;
+
+  return 1;
+}
 # ifdef __cplusplus
 }
 # endif
 
 #endif /* HEADER_PACKET_LOCL_H */
-
