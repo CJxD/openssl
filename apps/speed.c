@@ -297,9 +297,9 @@ static double Time_F(int s)
         schlock = 0;
         thr = CreateThread(NULL, 4096, sleepy, NULL, 0, NULL);
         if (thr == NULL) {
-            DWORD ret = GetLastError();
-            BIO_printf(bio_err, "unable to CreateThread (%d)", ret);
-            ExitProcess(ret);
+            DWORD err = GetLastError();
+            BIO_printf(bio_err, "unable to CreateThread (%lu)", err);
+            ExitProcess(err);
         }
         while (!schlock)
             Sleep(0);           /* scheduler spinlock */
@@ -405,7 +405,7 @@ OPTIONS speed_options[] = {
 #define D_IGE_192_AES   27
 #define D_IGE_256_AES   28
 #define D_GHASH         29
-OPT_PAIR doit_choices[] = {
+static OPT_PAIR doit_choices[] = {
 #ifndef OPENSSL_NO_MD2
     {"md2", D_MD2},
 #endif
@@ -521,7 +521,7 @@ static OPT_PAIR rsa_choices[] = {
 #define R_EC_B283    13
 #define R_EC_B409    14
 #define R_EC_B571    15
-#ifndef OPENSSL_NO_ECA
+#ifndef OPENSSL_NO_EC
 static OPT_PAIR ecdsa_choices[] = {
     {"ecdsap160", R_EC_P160},
     {"ecdsap192", R_EC_P192},
@@ -575,7 +575,6 @@ int speed_main(int argc, char **argv)
     long c[ALGOR_NUM][SIZE_NUM], count = 0, save_count = 0;
     unsigned char *buf_malloc = NULL, *buf2_malloc = NULL;
     unsigned char *buf = NULL, *buf2 = NULL;
-    unsigned char *save_buf = NULL, *save_buf2 = NULL;
     unsigned char md[EVP_MAX_MD_SIZE];
 #ifndef NO_FORK
     int multi = 0;
@@ -2183,8 +2182,8 @@ int speed_main(int argc, char **argv)
 
  end:
     ERR_print_errors(bio_err);
-    OPENSSL_free(save_buf);
-    OPENSSL_free(save_buf2);
+    OPENSSL_free(buf_malloc);
+    OPENSSL_free(buf2_malloc);
 #ifndef OPENSSL_NO_RSA
     for (i = 0; i < RSA_NUM; i++)
         RSA_free(rsa_key[i]);
@@ -2201,7 +2200,6 @@ int speed_main(int argc, char **argv)
         EC_KEY_free(ecdh_b[i]);
     }
 #endif
-
     return (ret);
 }
 

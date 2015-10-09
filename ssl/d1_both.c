@@ -187,13 +187,12 @@ static hm_fragment *dtls1_hm_fragment_new(unsigned long frag_len,
 
     /* Initialize reassembly bitmask if necessary */
     if (reassembly) {
-        bitmask = OPENSSL_malloc(RSMBLY_BITMASK_SIZE(frag_len));
+        bitmask = OPENSSL_zalloc(RSMBLY_BITMASK_SIZE(frag_len));
         if (bitmask == NULL) {
             OPENSSL_free(buf);
             OPENSSL_free(frag);
             return NULL;
         }
-        memset(bitmask, 0, RSMBLY_BITMASK_SIZE(frag_len));
     }
 
     frag->reassembly = bitmask;
@@ -270,7 +269,8 @@ int dtls1_do_write(SSL *s, int type)
 
     if (s->write_hash) {
         if (s->enc_write_ctx
-            && EVP_CIPHER_CTX_mode(s->enc_write_ctx) == EVP_CIPH_GCM_MODE)
+            && ((EVP_CIPHER_CTX_mode(s->enc_write_ctx) == EVP_CIPH_GCM_MODE) ||
+                (EVP_CIPHER_CTX_mode(s->enc_write_ctx) == EVP_CIPH_CCM_MODE)))
             mac_size = 0;
         else
             mac_size = EVP_MD_CTX_size(s->write_hash);
@@ -454,15 +454,26 @@ long dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
      * absence of an optional handshake message
      */
     if (s->s3->tmp.reuse_message) {
-        s->s3->tmp.reuse_message = 0;
         if ((mt >= 0) && (s->s3->tmp.message_type != mt)) {
             al = SSL_AD_UNEXPECTED_MESSAGE;
             SSLerr(SSL_F_DTLS1_GET_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
             goto f_err;
         }
         *ok = 1;
-        s->init_msg = s->init_buf->data + DTLS1_HM_HEADER_LENGTH;
+
+
+        /*
+         * Messages reused from dtls1_listen also have the record header in
+         * the buffer which we need to skip over.
+         */
+        if (s->s3->tmp.reuse_message == DTLS1_SKIP_RECORD_HEADER) {
+            s->init_msg = s->init_buf->data + DTLS1_HM_HEADER_LENGTH
+                          + DTLS1_RT_HEADER_LENGTH;
+        } else {
+            s->init_msg = s->init_buf->data + DTLS1_HM_HEADER_LENGTH;
+        }
         s->init_num = (int)s->s3->tmp.message_size;
+        s->s3->tmp.reuse_message = 0;
         return s->init_num;
     }
 
@@ -519,9 +530,8 @@ long dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 
     memset(msg_hdr, 0, sizeof(*msg_hdr));
 
-    /* Don't change sequence numbers while listening */
-    if (!s->d1->listen)
-        s->d1->handshake_read_seq++;
+    s->d1->handshake_read_seq++;
+
 
     s->init_msg = s->init_buf->data + DTLS1_HM_HEADER_LENGTH;
     return s->init_num;
@@ -935,8 +945,7 @@ dtls1_get_message_fragment(SSL *s, int st1, int stn, int mt, long max, int *ok)
      * While listening, we accept seq 1 (ClientHello with cookie)
      * although we're still expecting seq 0 (ClientHello)
      */
-    if (msg_hdr.seq != s->d1->handshake_read_seq
-        && !(s->d1->listen && msg_hdr.seq == 1))
+    if (msg_hdr.seq != s->d1->handshake_read_seq)
         return dtls1_process_out_of_seq_message(s, &msg_hdr, ok);
 
     if (frag_len && frag_len < len)
@@ -1289,8 +1298,7 @@ void dtls1_set_message_header(SSL *s, unsigned char *p,
                                         unsigned long frag_off,
                                         unsigned long frag_len)
 {
-    /* Don't change sequence numbers while listening */
-    if (frag_off == 0 && !s->d1->listen) {
+    if (frag_off == 0) {
         s->d1->handshake_write_seq = s->d1->next_handshake_write_seq;
         s->d1->next_handshake_write_seq++;
     }

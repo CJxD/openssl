@@ -59,8 +59,10 @@
 
 #include <stdio.h>
 #include "internal/cryptlib.h"
+#include "internal/numbers.h"
 #include <openssl/x509v3.h>
 #include <openssl/x509_vfy.h>
+#include "internal/x509_int.h"
 
 static void x509v3_cache_extensions(X509 *x);
 
@@ -321,8 +323,10 @@ int X509_supported_extension(X509_EXTENSION *ex)
         NID_basic_constraints,  /* 87 */
         NID_certificate_policies, /* 89 */
         NID_ext_key_usage,      /* 126 */
+#ifndef OPENSSL_NO_RFC3779
         NID_sbgp_ipAddrBlock,   /* 290 */
         NID_sbgp_autonomousSysNum, /* 291 */
+#endif
         NID_policy_constraints, /* 401 */
         NID_proxyCertInfo,      /* 663 */
         NID_name_constraints,   /* 666 */
@@ -502,9 +506,11 @@ static void x509v3_cache_extensions(X509 *x)
         x->ex_flags |= EXFLAG_INVALID;
     setup_crldp(x);
 
+#ifndef OPENSSL_NO_RFC3779
     x->rfc3779_addr = X509_get_ext_d2i(x, NID_sbgp_ipAddrBlock, NULL, NULL);
     x->rfc3779_asid = X509_get_ext_d2i(x, NID_sbgp_autonomousSysNum,
                                        NULL, NULL);
+#endif
     for (i = 0; i < X509_get_ext_count(x); i++) {
         ex = X509_get_ext(x, i);
         if (OBJ_obj2nid(X509_EXTENSION_get_object(ex))
@@ -840,4 +846,32 @@ int X509_check_akid(X509 *issuer, AUTHORITY_KEYID *akid)
             return X509_V_ERR_AKID_ISSUER_SERIAL_MISMATCH;
     }
     return X509_V_OK;
+}
+
+uint32_t X509_get_extension_flags(X509 *x)
+{
+    X509_check_purpose(x, -1, -1);
+    return x->ex_flags;
+}
+
+uint32_t X509_get_key_usage(X509 *x)
+{
+    X509_check_purpose(x, -1, -1);
+    if (x->ex_flags & EXFLAG_KUSAGE)
+        return x->ex_kusage;
+    return UINT32_MAX;
+}
+
+uint32_t X509_get_extended_key_usage(X509 *x)
+{
+    X509_check_purpose(x, -1, -1);
+    if (x->ex_flags & EXFLAG_XKUSAGE)
+        return x->ex_xkusage;
+    return UINT32_MAX;
+}
+
+const ASN1_OCTET_STRING *X509_get0_subject_key_id(X509 *x)
+{
+    X509_check_purpose(x, -1, -1);
+    return x->skid;
 }

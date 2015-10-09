@@ -80,8 +80,7 @@ static char prog[40];
 #if defined(OPENSSL_SYS_WIN32) || defined(OPENSSL_SYS_NETWARE)
 char *opt_progname(const char *argv0)
 {
-    int i;
-    int n;
+    size_t i, n;
     const char *p;
     char *q;
 
@@ -543,6 +542,10 @@ int opt_verify(int opt, X509_VERIFY_PARAM *vpm)
         break;
     case OPT_V_NO_ALT_CHAINS:
         X509_VERIFY_PARAM_set_flags(vpm, X509_V_FLAG_NO_ALT_CHAINS);
+	break;
+    case OPT_V_NO_CHECK_TIME:
+        X509_VERIFY_PARAM_set_flags(vpm, X509_V_FLAG_NO_CHECK_TIME);
+	break;
     }
     return 1;
 

@@ -115,6 +115,7 @@
 # include "e_os.h"
 # include <assert.h>
 
+# include <openssl/e_os2.h>
 # include <openssl/bio.h>
 # include <openssl/x509.h>
 # include <openssl/lhash.h>
@@ -152,19 +153,15 @@ extern char *default_config_file;
 extern BIO *bio_in;
 extern BIO *bio_out;
 extern BIO *bio_err;
-BIO *dup_bio_in(void);
-BIO *dup_bio_out(void);
-BIO *bio_open_owner(const char *filename, const char *mode, int private);
-BIO *bio_open_default(const char *filename, const char *mode);
-BIO *bio_open_default_quiet(const char *filename, const char *mode);
+BIO *dup_bio_in(int format);
+BIO *dup_bio_out(int format);
+BIO *bio_open_owner(const char *filename, int format, int private);
+BIO *bio_open_default(const char *filename, char mode, int format);
+BIO *bio_open_default_quiet(const char *filename, char mode, int format);
 CONF *app_load_config(const char *filename);
 CONF *app_load_config_quiet(const char *filename);
 int app_load_modules(const CONF *config);
 void unbuffer(FILE *fp);
-
-/* Often used in calls to bio_open_default. */
-# define RB(xformat)  ((xformat) == FORMAT_ASN1 ? "rb" : "r")
-# define WB(xformat)  ((xformat) == FORMAT_ASN1 ? "wb" : "w")
 
 /*
  * Common verification options.
@@ -179,7 +176,7 @@ void unbuffer(FILE *fp);
         OPT_V_X509_STRICT, OPT_V_EXTENDED_CRL, OPT_V_USE_DELTAS, \
         OPT_V_POLICY_PRINT, OPT_V_CHECK_SS_SIG, OPT_V_TRUSTED_FIRST, \
         OPT_V_SUITEB_128_ONLY, OPT_V_SUITEB_128, OPT_V_SUITEB_192, \
-        OPT_V_PARTIAL_CHAIN, OPT_V_NO_ALT_CHAINS, \
+        OPT_V_PARTIAL_CHAIN, OPT_V_NO_ALT_CHAINS, OPT_V_NO_CHECK_TIME, \
         OPT_V__LAST
 
 # define OPT_V_OPTIONS \
@@ -209,7 +206,8 @@ void unbuffer(FILE *fp);
         { "suiteB_128", OPT_V_SUITEB_128, '-' }, \
         { "suiteB_192", OPT_V_SUITEB_192, '-' }, \
         { "partial_chain", OPT_V_PARTIAL_CHAIN, '-' }, \
-        { "no_alt_chains", OPT_V_NO_ALT_CHAINS, '-', "Only use the first cert chain found" }
+        { "no_alt_chains", OPT_V_NO_ALT_CHAINS, '-', "Only use the first cert chain found" }, \
+        { "no_check_time", OPT_V_NO_CHECK_TIME, '-', "Do not check validity against current time" }
 
 # define OPT_V_CASES \
         OPT_V__FIRST: case OPT_V__LAST: break; \
@@ -239,7 +237,8 @@ void unbuffer(FILE *fp);
         case OPT_V_SUITEB_128: \
         case OPT_V_SUITEB_192: \
         case OPT_V_PARTIAL_CHAIN: \
-        case OPT_V_NO_ALT_CHAINS
+        case OPT_V_NO_ALT_CHAINS: \
+        case OPT_V_NO_CHECK_TIME
 
 /*
  * Common "extended"? options.
@@ -443,9 +442,10 @@ STACK_OF(X509) *load_certs(const char *file, int format,
 STACK_OF(X509_CRL) *load_crls(const char *file, int format,
                               const char *pass, ENGINE *e,
                               const char *cert_descrip);
-X509_STORE *setup_verify(char *CAfile, char *CApath);
-int ctx_set_verify_locations(SSL_CTX *ctx,
-                             const char *CAfile, const char *CApath);
+X509_STORE *setup_verify(char *CAfile, char *CApath,
+                         int noCAfile, int noCApath);
+int ctx_set_verify_locations(SSL_CTX *ctx, const char *CAfile,
+                             const char *CApath, int noCAfile, int noCApath);
 # ifdef OPENSSL_NO_ENGINE
 #  define setup_engine(engine, debug) NULL
 # else
@@ -533,19 +533,27 @@ void print_cert_checks(BIO *bio, X509 *x,
 void store_setup_crl_download(X509_STORE *st);
 
 /* See OPT_FMT_xxx, above. */
+/* On some platforms, it's important to distinguish between text and binary
+ * files.  On some, there might even be specific file formats for different
+ * contents.  The FORMAT_xxx macros are meant to express an intent with the
+ * file being read or created.
+ */
+# define B_FORMAT_TEXT   0x8000
 # define FORMAT_UNDEF    0
-# define FORMAT_ASN1     1
-# define FORMAT_TEXT     2
-# define FORMAT_PEM      3
-# define FORMAT_PKCS12   5
-# define FORMAT_SMIME    6
-# define FORMAT_ENGINE   7
-# define FORMAT_PEMRSA   9      /* PEM RSAPubicKey format */
-# define FORMAT_ASN1RSA  10     /* DER RSAPubicKey format */
-# define FORMAT_MSBLOB   11     /* MS Key blob format */
-# define FORMAT_PVK      12     /* MS PVK file format */
-# define FORMAT_HTTP     13     /* Download using HTTP */
-# define FORMAT_NSS      14     /* NSS keylog format */
+# define FORMAT_TEXT    (1 | B_FORMAT_TEXT)     /* Generic text */
+# define FORMAT_BINARY   2                      /* Generic binary */
+# define FORMAT_BASE64  (3 | B_FORMAT_TEXT)     /* Base64 */
+# define FORMAT_ASN1     4                      /* ASN.1/DER */
+# define FORMAT_PEM     (5 | B_FORMAT_TEXT)
+# define FORMAT_PKCS12   6
+# define FORMAT_SMIME   (7 | B_FORMAT_TEXT)
+# define FORMAT_ENGINE   8                      /* Not really a file format */
+# define FORMAT_PEMRSA  (9 | B_FORMAT_TEXT)     /* PEM RSAPubicKey format */
+# define FORMAT_ASN1RSA  10                     /* DER RSAPubicKey format */
+# define FORMAT_MSBLOB   11                     /* MS Key blob format */
+# define FORMAT_PVK      12                     /* MS PVK file format */
+# define FORMAT_HTTP     13                     /* Download using HTTP */
+# define FORMAT_NSS      14                     /* NSS keylog format */
 
 # define EXT_COPY_NONE   0
 # define EXT_COPY_ADD    1
@@ -566,6 +574,12 @@ int raw_write_stdout(const void *, int);
 # define TM_START        0
 # define TM_STOP         1
 double app_tminterval(int stop, int usertime);
+
+/* this is an accident waiting to happen (-Wshadow is your friend) */
+extern int verify_depth;
+extern int verify_quiet;
+extern int verify_error;
+extern int verify_return_error;
 
 # include "progs.h"
 

@@ -793,9 +793,10 @@ end_of_options:
             extensions = "default";
     }
 
-        /*****************************************************************/
+    /*****************************************************************/
     if (req || gencrl) {
-        Sout = bio_open_default(outfile, "w");
+        /* FIXME: Is it really always text? */
+        Sout = bio_open_default(outfile, 'w', FORMAT_TEXT);
         if (Sout == NULL)
             goto end;
     }
@@ -1052,13 +1053,14 @@ end_of_options:
         if (verbose)
             BIO_printf(bio_err, "writing new certificates\n");
         for (i = 0; i < sk_X509_num(cert_sk); i++) {
+            ASN1_INTEGER *serialNumber = X509_get_serialNumber(x);
             int k;
             char *n;
 
             x = sk_X509_value(cert_sk, i);
 
-            j = x->cert_info->serialNumber->length;
-            p = (const char *)x->cert_info->serialNumber->data;
+            j = ASN1_STRING_length(serialNumber);
+            p = (const char *)ASN1_STRING_data(serialNumber);
 
             if (strlen(outdir) >= (size_t)(j ? BSIZE - j * 2 - 6 : BSIZE - 8)) {
                 BIO_printf(bio_err, "certificate file name too long\n");
@@ -1450,7 +1452,6 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     ASN1_STRING *str, *str2;
     ASN1_OBJECT *obj;
     X509 *ret = NULL;
-    X509_CINF *ci;
     X509_NAME_ENTRY *ne;
     X509_NAME_ENTRY *tne, *push;
     EVP_PKEY *pktmp;
@@ -1479,7 +1480,6 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
             goto end;
         }
         X509_REQ_set_subject_name(req, n);
-        req->req_info->enc.modified = 1;
         X509_NAME_free(n);
     }
 
@@ -1547,7 +1547,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     if (selfsign)
         CAname = X509_NAME_dup(name);
     else
-        CAname = X509_NAME_dup(x509->cert_info->subject);
+        CAname = X509_NAME_dup(X509_get_subject_name(x509));
     if (CAname == NULL)
         goto end;
     str = str2 = NULL;
@@ -1756,7 +1756,6 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
 
     if ((ret = X509_new()) == NULL)
         goto end;
-    ci = ret->cert_info;
 
 #ifdef X509_V3
     /* Make it an X509 v3 certificate. */
@@ -1764,7 +1763,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
         goto end;
 #endif
 
-    if (BN_to_ASN1_INTEGER(serial, ci->serialNumber) == NULL)
+    if (BN_to_ASN1_INTEGER(serial, X509_get_serialNumber(ret)) == NULL)
         goto end;
     if (selfsign) {
         if (!X509_set_issuer_name(ret, subject))
@@ -1800,17 +1799,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     /* Lets add the extensions, if there are any */
     if (ext_sect) {
         X509V3_CTX ctx;
-        if (ci->version == NULL)
-            if ((ci->version = ASN1_INTEGER_new()) == NULL)
-                goto end;
-        ASN1_INTEGER_set(ci->version, 2); /* version 3 certificate */
-
-        /*
-         * Free the current entries if any, there should not be any I believe
-         */
-        sk_X509_EXTENSION_pop_free(ci->extensions, X509_EXTENSION_free);
-
-        ci->extensions = NULL;
+        X509_set_version(ret, 2);
 
         /* Initialize the context structure */
         if (selfsign)
@@ -1993,7 +1982,6 @@ static int certify_spkac(X509 **xret, char *infile, EVP_PKEY *pkey,
     X509_REQ *req = NULL;
     CONF_VALUE *cv = NULL;
     NETSCAPE_SPKI *spki = NULL;
-    X509_REQ_INFO *ri;
     char *type, *buf;
     EVP_PKEY *pktmp = NULL;
     X509_NAME *n = NULL;
@@ -2037,8 +2025,7 @@ static int certify_spkac(X509 **xret, char *infile, EVP_PKEY *pkey,
     /*
      * Build up the subject name set.
      */
-    ri = req->req_info;
-    n = ri->subject;
+    n = X509_REQ_get_subject_name(req);
 
     for (i = 0;; i++) {
         if (sk_CONF_VALUE_num(sk) <= i)

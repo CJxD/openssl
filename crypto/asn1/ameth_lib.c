@@ -65,14 +65,6 @@
 #endif
 #include "internal/asn1_int.h"
 
-extern const EVP_PKEY_ASN1_METHOD rsa_asn1_meths[];
-extern const EVP_PKEY_ASN1_METHOD dsa_asn1_meths[];
-extern const EVP_PKEY_ASN1_METHOD dh_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD dhx_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD eckey_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD hmac_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD cmac_asn1_meth;
-
 /* Keep this sorted in type order !! */
 static const EVP_PKEY_ASN1_METHOD *standard_methods[] = {
 #ifndef OPENSSL_NO_RSA
@@ -283,12 +275,11 @@ const EVP_PKEY_ASN1_METHOD *EVP_PKEY_get0_asn1(EVP_PKEY *pkey)
 EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_new(int id, int flags,
                                         const char *pem_str, const char *info)
 {
-    EVP_PKEY_ASN1_METHOD *ameth;
-    ameth = OPENSSL_malloc(sizeof(*ameth));
+    EVP_PKEY_ASN1_METHOD *ameth = OPENSSL_zalloc(sizeof(*ameth));
+
     if (!ameth)
         return NULL;
 
-    memset(ameth, 0, sizeof(*ameth));
     ameth->pkey_id = id;
     ameth->pkey_base_id = id;
     ameth->pkey_flags = flags | ASN1_PKEY_DYNAMIC;
@@ -297,48 +288,17 @@ EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_new(int id, int flags,
         ameth->info = BUF_strdup(info);
         if (!ameth->info)
             goto err;
-    } else
-        ameth->info = NULL;
+    }
 
     if (pem_str) {
         ameth->pem_str = BUF_strdup(pem_str);
         if (!ameth->pem_str)
             goto err;
-    } else
-        ameth->pem_str = NULL;
-
-    ameth->pub_decode = 0;
-    ameth->pub_encode = 0;
-    ameth->pub_cmp = 0;
-    ameth->pub_print = 0;
-
-    ameth->priv_decode = 0;
-    ameth->priv_encode = 0;
-    ameth->priv_print = 0;
-
-    ameth->old_priv_encode = 0;
-    ameth->old_priv_decode = 0;
-
-    ameth->item_verify = 0;
-    ameth->item_sign = 0;
-
-    ameth->pkey_size = 0;
-    ameth->pkey_bits = 0;
-
-    ameth->param_decode = 0;
-    ameth->param_encode = 0;
-    ameth->param_missing = 0;
-    ameth->param_copy = 0;
-    ameth->param_cmp = 0;
-    ameth->param_print = 0;
-
-    ameth->pkey_free = 0;
-    ameth->pkey_ctrl = 0;
+    }
 
     return ameth;
 
  err:
-
     EVP_PKEY_asn1_free(ameth);
     return NULL;
 

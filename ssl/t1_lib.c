@@ -1815,10 +1815,11 @@ static int tls1_alpn_handle_client_hello(SSL *s, PACKET *pkt, int *al)
  * Sadly we cannot differentiate 10.6, 10.7 and 10.8.4 (which work), from
  * 10.8..10.8.3 (which don't work).
  */
-static void ssl_check_for_safari(SSL *s, PACKET *pkt)
+static void ssl_check_for_safari(SSL *s, const PACKET *pkt)
 {
     unsigned int type, size;
     unsigned char *eblock1, *eblock2;
+    PACKET tmppkt;
 
     static const unsigned char kSafariExtensionsBlock[] = {
         0x00, 0x0a,             /* elliptic_curves extension */
@@ -1846,10 +1847,12 @@ static void ssl_check_for_safari(SSL *s, PACKET *pkt)
         0x02, 0x03,             /* SHA-1/ECDSA */
     };
 
-    if (!PACKET_forward(pkt, 2)
-            || !PACKET_get_net_2(pkt, &type)
-            || !PACKET_get_net_2(pkt, &size)
-            || !PACKET_forward(pkt, size))
+    tmppkt = *pkt;
+
+    if (!PACKET_forward(&tmppkt, 2)
+            || !PACKET_get_net_2(&tmppkt, &type)
+            || !PACKET_get_net_2(&tmppkt, &size)
+            || !PACKET_forward(&tmppkt, size))
         return;
 
     if (type != TLSEXT_TYPE_server_name)
@@ -1859,9 +1862,9 @@ static void ssl_check_for_safari(SSL *s, PACKET *pkt)
         const size_t len1 = sizeof(kSafariExtensionsBlock);
         const size_t len2 = sizeof(kSafariTLS12ExtensionsBlock);
 
-        if (!PACKET_get_bytes(pkt, &eblock1, len1)
-                || !PACKET_get_bytes(pkt, &eblock2, len2)
-                || PACKET_remaining(pkt))
+        if (!PACKET_get_bytes(&tmppkt, &eblock1, len1)
+                || !PACKET_get_bytes(&tmppkt, &eblock2, len2)
+                || PACKET_remaining(&tmppkt))
             return;
         if (memcmp(eblock1, kSafariExtensionsBlock, len1) != 0)
             return;
@@ -1870,8 +1873,8 @@ static void ssl_check_for_safari(SSL *s, PACKET *pkt)
     } else {
         const size_t len = sizeof(kSafariExtensionsBlock);
 
-        if (!PACKET_get_bytes(pkt, &eblock1, len)
-                || PACKET_remaining(pkt))
+        if (!PACKET_get_bytes(&tmppkt, &eblock1, len)
+                || PACKET_remaining(&tmppkt))
             return;
         if (memcmp(eblock1, kSafariExtensionsBlock, len) != 0)
             return;
@@ -1925,6 +1928,9 @@ static int ssl_scan_clienthello_tlsext(SSL *s, PACKET *pkt, int *al)
         goto ri_check;
 
     if (!PACKET_get_net_2(pkt, &len))
+        goto err;
+
+    if (PACKET_remaining(pkt) != len)
         goto err;
 
     while (PACKET_get_net_2(pkt, &type) && PACKET_get_net_2(pkt, &size)) {
@@ -2344,28 +2350,23 @@ int ssl_parse_clienthello_tlsext(SSL *s, PACKET *pkt)
  * elements of zero length are allowed and the set of elements must exactly
  * fill the length of the block.
  */
-static char ssl_next_proto_validate(unsigned char *d, unsigned len)
+static char ssl_next_proto_validate(PACKET *pkt)
 {
-    unsigned int off = 0;
+    unsigned int len;
 
-    while (off < len) {
-        if (d[off] == 0)
+    while (PACKET_remaining(pkt)) {
+        if (!PACKET_get_1(pkt, &len)
+                || !PACKET_forward(pkt, len))
             return 0;
-        off += d[off];
-        off++;
     }
 
-    return off == len;
+    return 1;
 }
 #endif
 
-static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
-                                       unsigned char *d, int n, int *al)
+static int ssl_scan_serverhello_tlsext(SSL *s, PACKET *pkt, int *al)
 {
-    unsigned short length;
-    unsigned short type;
-    unsigned short size;
-    unsigned char *data = *p;
+    unsigned int length, type, size;
     int tlsext_servername = 0;
     int renegotiate_seen = 0;
 
@@ -2385,27 +2386,27 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
     s->s3->flags &= ~TLS1_FLAGS_ENCRYPT_THEN_MAC;
 #endif
 
-    if (data >= (d + n - 2))
+    if (!PACKET_get_net_2(pkt, &length))
         goto ri_check;
 
-    n2s(data, length);
-    if (data + length != d + n) {
+    if (PACKET_remaining(pkt) != length) {
         *al = SSL_AD_DECODE_ERROR;
         return 0;
     }
 
-    while (data <= (d + n - 4)) {
-        n2s(data, type);
-        n2s(data, size);
+    while (PACKET_get_net_2(pkt, &type) && PACKET_get_net_2(pkt, &size)) {
+        unsigned char *data;
+        PACKET spkt;
 
-        if (data + size > (d + n))
+        if (!PACKET_get_sub_packet(pkt, &spkt, size)
+                ||  !PACKET_peek_bytes(&spkt, &data, size))
             goto ri_check;
 
         if (s->tlsext_debug_cb)
             s->tlsext_debug_cb(s, 1, type, data, size, s->tlsext_debug_arg);
 
         if (type == TLSEXT_TYPE_renegotiate) {
-            if (!ssl_parse_serverhello_renegotiate_ext(s, data, size, al))
+            if (!ssl_parse_serverhello_renegotiate_ext(s, &spkt, al))
                 return 0;
             renegotiate_seen = 1;
         } else if (s->version == SSL3_VERSION) {
@@ -2418,10 +2419,9 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
         }
 #ifndef OPENSSL_NO_EC
         else if (type == TLSEXT_TYPE_ec_point_formats) {
-            unsigned char *sdata = data;
-            int ecpointformatlist_length = *(sdata++);
-
-            if (ecpointformatlist_length != size - 1) {
+            unsigned int ecpointformatlist_length;
+            if (!PACKET_get_1(&spkt, &ecpointformatlist_length)
+                    || ecpointformatlist_length != size - 1) {
                 *al = TLS1_AD_DECODE_ERROR;
                 return 0;
             }
@@ -2435,8 +2435,13 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
                 }
                 s->session->tlsext_ecpointformatlist_length =
                     ecpointformatlist_length;
-                memcpy(s->session->tlsext_ecpointformatlist, sdata,
-                       ecpointformatlist_length);
+                if (!PACKET_copy_bytes(&spkt,
+                                       s->session->tlsext_ecpointformatlist,
+                                       ecpointformatlist_length)) {
+                    *al = TLS1_AD_DECODE_ERROR;
+                    return 0;
+                }
+
             }
         }
 #endif                         /* OPENSSL_NO_EC */
@@ -2472,14 +2477,13 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
                  s->s3->tmp.finish_md_len == 0) {
             unsigned char *selected;
             unsigned char selected_len;
-
             /* We must have requested it. */
             if (s->ctx->next_proto_select_cb == NULL) {
                 *al = TLS1_AD_UNSUPPORTED_EXTENSION;
                 return 0;
             }
             /* The data must be valid */
-            if (!ssl_next_proto_validate(data, size)) {
+            if (!ssl_next_proto_validate(&spkt)) {
                 *al = TLS1_AD_DECODE_ERROR;
                 return 0;
             }
@@ -2504,14 +2508,9 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
 
         else if (type == TLSEXT_TYPE_application_layer_protocol_negotiation) {
             unsigned len;
-
             /* We must have requested it. */
             if (s->alpn_client_proto_list == NULL) {
                 *al = TLS1_AD_UNSUPPORTED_EXTENSION;
-                return 0;
-            }
-            if (size < 4) {
-                *al = TLS1_AD_DECODE_ERROR;
                 return 0;
             }
             /*-
@@ -2520,15 +2519,10 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
              *   uint8 proto_length;
              *   uint8 proto[proto_length];
              */
-            len = data[0];
-            len <<= 8;
-            len |= data[1];
-            if (len != (unsigned)size - 2) {
-                *al = TLS1_AD_DECODE_ERROR;
-                return 0;
-            }
-            len = data[2];
-            if (len != (unsigned)size - 3) {
+            if (!PACKET_get_net_2(&spkt, &len)
+                    || PACKET_remaining(&spkt) != len
+                    || !PACKET_get_1(&spkt, &len)
+                    || PACKET_remaining(&spkt) != len) {
                 *al = TLS1_AD_DECODE_ERROR;
                 return 0;
             }
@@ -2538,12 +2532,20 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
                 *al = TLS1_AD_INTERNAL_ERROR;
                 return 0;
             }
-            memcpy(s->s3->alpn_selected, data + 3, len);
+            if (!PACKET_copy_bytes(&spkt, s->s3->alpn_selected, len)) {
+                *al = TLS1_AD_DECODE_ERROR;
+                return 0;
+            }
             s->s3->alpn_selected_len = len;
         }
 #ifndef OPENSSL_NO_HEARTBEATS
         else if (type == TLSEXT_TYPE_heartbeat) {
-            switch (data[0]) {
+            unsigned int hbtype;
+            if (!PACKET_get_1(&spkt, &hbtype)) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
+            switch (hbtype) {
             case 0x01:         /* Server allows us to send HB requests */
                 s->tlsext_heartbeat |= SSL_TLSEXT_HB_ENABLED;
                 break;
@@ -2559,7 +2561,7 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
 #endif
 #ifndef OPENSSL_NO_SRTP
         else if (SSL_IS_DTLS(s) && type == TLSEXT_TYPE_use_srtp) {
-            if (ssl_parse_serverhello_use_srtp_ext(s, data, size, al))
+            if (ssl_parse_serverhello_use_srtp_ext(s, &spkt, al))
                 return 0;
         }
 #endif
@@ -2581,11 +2583,9 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
          */
         else if (custom_ext_parse(s, 0, type, data, size, al) <= 0)
             return 0;
-
-        data += size;
     }
 
-    if (data != d + n) {
+    if (PACKET_remaining(pkt) != 0) {
         *al = SSL_AD_DECODE_ERROR;
         return 0;
     }
@@ -2604,8 +2604,6 @@ static int ssl_scan_serverhello_tlsext(SSL *s, unsigned char **p,
             }
         }
     }
-
-    *p = data;
 
  ri_check:
 
@@ -2887,13 +2885,12 @@ int ssl_check_serverhello_tlsext(SSL *s)
     }
 }
 
-int ssl_parse_serverhello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
-                                 int n)
+int ssl_parse_serverhello_tlsext(SSL *s, PACKET *pkt)
 {
     int al = -1;
     if (s->version < SSL3_VERSION)
         return 1;
-    if (ssl_scan_serverhello_tlsext(s, p, d, n, &al) <= 0) {
+    if (ssl_scan_serverhello_tlsext(s, pkt, &al) <= 0) {
         ssl3_send_alert(s, SSL3_AL_FATAL, al);
         return 0;
     }
@@ -2910,11 +2907,8 @@ int ssl_parse_serverhello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
  * ClientHello, and other operations depend on the result, we need to handle
  * any TLS session ticket extension at the same time.
  *
- *   session_id: points at the session ID in the ClientHello. This code will
- *       read past the end of this in order to parse out the session ticket
- *       extension, if any.
- *   len: the length of the session ID.
- *   limit: a pointer to the first byte after the ClientHello.
+ *   session_id: ClientHello session ID.
+ *   ext: ClientHello extensions (including length prefix)
  *   ret: (output) on return, if a ticket was decrypted, then this is set to
  *       point to the resulting session.
  *
@@ -2939,11 +2933,11 @@ int ssl_parse_serverhello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
  *   s->ctx->tlsext_ticket_key_cb asked to renew the client's ticket.
  *   Otherwise, s->tlsext_ticket_expected is set to 0.
  */
-int tls1_process_ticket(SSL *s, PACKET *pkt,  unsigned char *session_id,
-                        int len, SSL_SESSION **ret)
+int tls1_process_ticket(SSL *s, const PACKET *ext, const PACKET *session_id,
+                        SSL_SESSION **ret)
 {
     unsigned int i;
-    size_t bookmark = 0;
+    PACKET local_ext = *ext;
     int retv = -1;
 
     *ret = NULL;
@@ -2958,42 +2952,20 @@ int tls1_process_ticket(SSL *s, PACKET *pkt,  unsigned char *session_id,
     if ((s->version <= SSL3_VERSION))
         return 0;
 
-    if (!PACKET_get_bookmark(pkt, &bookmark)) {
-        return -1;
-    }
-
-    /* Skip past DTLS cookie */
-    if (SSL_IS_DTLS(s)) {
-        if (!PACKET_get_1(pkt, &i)
-                || !PACKET_forward(pkt, i)) {
-            retv = -1;
-            goto end;
-        }
-    }
-    /* Skip past cipher list and compression algorithm list */
-    if (!PACKET_get_net_2(pkt, &i)
-            || !PACKET_forward(pkt, i)
-            || !PACKET_get_1(pkt, &i)
-            || !PACKET_forward(pkt, i)) {
-        retv = -1;
-        goto end;
-    }
-
-    /* Now at start of extensions */
-    if (!PACKET_get_net_2(pkt, &i)) {
+    if (!PACKET_get_net_2(&local_ext, &i)) {
         retv = 0;
         goto end;
     }
-    while (PACKET_remaining (pkt) >= 4) {
+    while (PACKET_remaining(&local_ext) >= 4) {
         unsigned int type, size;
 
-        if (!PACKET_get_net_2(pkt, &type)
-                || !PACKET_get_net_2(pkt, &size)) {
+        if (!PACKET_get_net_2(&local_ext, &type)
+                || !PACKET_get_net_2(&local_ext, &size)) {
             /* Shouldn't ever happen */
             retv = -1;
             goto end;
         }
-        if (PACKET_remaining(pkt) < size) {
+        if (PACKET_remaining(&local_ext) < size) {
             retv = 0;
             goto end;
         }
@@ -3020,12 +2992,13 @@ int tls1_process_ticket(SSL *s, PACKET *pkt,  unsigned char *session_id,
                 retv = 2;
                 goto end;
             }
-            if (!PACKET_get_bytes(pkt, &etick, size)) {
+            if (!PACKET_get_bytes(&local_ext, &etick, size)) {
                 /* Shouldn't ever happen */
                 retv = -1;
                 goto end;
             }
-            r = tls_decrypt_ticket(s, etick, size, session_id, len, ret);
+            r = tls_decrypt_ticket(s, etick, size, PACKET_data(session_id),
+                                   PACKET_remaining(session_id), ret);
             switch (r) {
             case 2:            /* ticket couldn't be decrypted */
                 s->tlsext_ticket_expected = 1;
@@ -3044,7 +3017,7 @@ int tls1_process_ticket(SSL *s, PACKET *pkt,  unsigned char *session_id,
             }
             goto end;
         } else {
-            if (!PACKET_forward(pkt, size)) {
+            if (!PACKET_forward(&local_ext, size)) {
                 retv = -1;
                 goto end;
             }
@@ -3052,8 +3025,6 @@ int tls1_process_ticket(SSL *s, PACKET *pkt,  unsigned char *session_id,
     }
     retv = 0;
 end:
-    if (!PACKET_goto_bookmark(pkt, bookmark))
-        return -1;
     return retv;
 }
 

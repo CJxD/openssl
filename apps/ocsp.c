@@ -131,7 +131,7 @@ typedef enum OPTION_choice {
     OPT_NO_CERT_CHECKS, OPT_NO_EXPLICIT, OPT_TRUST_OTHER,
     OPT_NO_INTERN, OPT_BADSIG, OPT_TEXT, OPT_REQ_TEXT, OPT_RESP_TEXT,
     OPT_REQIN, OPT_RESPIN, OPT_SIGNER, OPT_VAFILE, OPT_SIGN_OTHER,
-    OPT_VERIFY_OTHER, OPT_CAFILE, OPT_CAPATH,
+    OPT_VERIFY_OTHER, OPT_CAFILE, OPT_CAPATH, OPT_NOCAFILE, OPT_NOCAPATH,
     OPT_VALIDITY_PERIOD, OPT_STATUS_AGE, OPT_SIGNKEY, OPT_REQOUT,
     OPT_RESPOUT, OPT_PATH, OPT_ISSUER, OPT_CERT, OPT_SERIAL,
     OPT_INDEX, OPT_CA, OPT_NMIN, OPT_REQUEST, OPT_NDAYS, OPT_RSIGNER,
@@ -183,6 +183,10 @@ OPTIONS ocsp_options[] = {
      "Additional certificates to search for signer"},
     {"CAfile", OPT_CAFILE, '<', "Trusted certificates file"},
     {"CApath", OPT_CAPATH, '<', "Trusted certificates directory"},
+    {"no-CAfile", OPT_NOCAFILE, '-',
+     "Do not load the default certificates file"},
+    {"no-CApath", OPT_NOCAPATH, '-',
+     "Do not load certificates from the default certificates directory"},
     {"validity_period", OPT_VALIDITY_PERIOD, 'u',
      "Maximum validity discrepancy in seconds"},
     {"status_age", OPT_STATUS_AGE, 'p', "Maximum status age in seconds"},
@@ -236,6 +240,7 @@ int ocsp_main(int argc, char **argv)
     char *sign_certfile = NULL, *verify_certfile = NULL, *rcertfile = NULL;
     char *signfile = NULL, *keyfile = NULL;
     char *thost = NULL, *tport = NULL, *tpath = NULL;
+    int noCAfile = 0, noCApath = 0;
     int accept_count = -1, add_nonce = 1, noverify = 0, use_ssl = -1;
     int vpmtouched = 0, badsig = 0, i, ignore_err = 0, nmin = 0, ndays = -1;
     int req_text = 0, resp_text = 0, req_timeout = -1, ret = 1;
@@ -369,6 +374,12 @@ int ocsp_main(int argc, char **argv)
         case OPT_CAPATH:
             CApath = opt_arg();
             break;
+        case OPT_NOCAFILE:
+            noCAfile = 1;
+            break;
+        case OPT_NOCAPATH:
+            noCApath = 1;
+            break;
         case OPT_V_CASES:
             if (!opt_verify(o, vpm))
                 goto end;
@@ -486,7 +497,7 @@ int ocsp_main(int argc, char **argv)
     if (!app_load_modules(NULL))
         goto end;
 
-    out = bio_open_default(outfile, "w");
+    out = bio_open_default(outfile, 'w', FORMAT_TEXT);
     if (out == NULL)
         goto end;
 
@@ -494,7 +505,7 @@ int ocsp_main(int argc, char **argv)
         add_nonce = 0;
 
     if (!req && reqin) {
-        derbio = bio_open_default(reqin, "rb");
+        derbio = bio_open_default(reqin, 'r', FORMAT_ASN1);
         if (derbio == NULL)
             goto end;
         req = d2i_OCSP_REQUEST_bio(derbio, NULL);
@@ -589,7 +600,7 @@ int ocsp_main(int argc, char **argv)
         OCSP_REQUEST_print(out, req, 0);
 
     if (reqout) {
-        derbio = bio_open_default(reqout, "wb");
+        derbio = bio_open_default(reqout, 'w', FORMAT_ASN1);
         if (derbio == NULL)
             goto end;
         i2d_OCSP_REQUEST_bio(derbio, req);
@@ -627,7 +638,7 @@ int ocsp_main(int argc, char **argv)
         goto end;
 # endif
     } else if (respin) {
-        derbio = bio_open_default(respin, "rb");
+        derbio = bio_open_default(respin, 'r', FORMAT_ASN1);
         if (derbio == NULL)
             goto end;
         resp = d2i_OCSP_RESPONSE_bio(derbio, NULL);
@@ -644,7 +655,7 @@ int ocsp_main(int argc, char **argv)
  done_resp:
 
     if (respout) {
-        derbio = bio_open_default(respout, "wb");
+        derbio = bio_open_default(respout, 'w', FORMAT_ASN1);
         if (derbio == NULL)
             goto end;
         i2d_OCSP_RESPONSE_bio(derbio, resp);
@@ -685,7 +696,7 @@ int ocsp_main(int argc, char **argv)
     }
 
     if (!store) {
-        store = setup_verify(CAfile, CApath);
+        store = setup_verify(CAfile, CApath, noCAfile, noCApath);
         if (!store)
             goto end;
     }

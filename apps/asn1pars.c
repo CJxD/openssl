@@ -190,17 +190,17 @@ int asn1parse_main(int argc, char **argv)
         goto end;
 
     if (oidfile != NULL) {
-      in = bio_open_default(oidfile, "r");
+        in = bio_open_default(oidfile, 'r', FORMAT_TEXT);
         if (in == NULL)
             goto end;
         OBJ_create_objects(in);
         BIO_free(in);
     }
 
-    if ((in = bio_open_default(infile, "r")) == NULL)
+    if ((in = bio_open_default(infile, 'r', informat)) == NULL)
         goto end;
 
-    if (derfile && (derout = bio_open_default(derfile, "wb")) == NULL)
+    if (derfile && (derout = bio_open_default(derfile, 'w', FORMAT_ASN1)) == NULL)
         goto end;
 
     if (strictpem) {
@@ -279,9 +279,9 @@ int asn1parse_main(int argc, char **argv)
             }
             typ = ASN1_TYPE_get(at);
             if ((typ == V_ASN1_OBJECT)
+                || (typ == V_ASN1_BOOLEAN)
                 || (typ == V_ASN1_NULL)) {
-                BIO_printf(bio_err, "Can't parse %s type\n",
-                           typ == V_ASN1_NULL ? "NULL" : "OBJECT");
+                BIO_printf(bio_err, "Can't parse %s type\n", ASN1_tag2str(typ));
                 ERR_print_errors(bio_err);
                 goto end;
             }

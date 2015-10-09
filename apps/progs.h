@@ -60,11 +60,11 @@ extern int ts_main(int argc, char *argv[]);
 extern int verify_main(int argc, char *argv[]);
 extern int version_main(int argc, char *argv[]);
 extern int x509_main(int argc, char *argv[]);
+extern int rehash_main(int argc, char *argv[]);
 extern int list_main(int argc, char *argv[]);
 extern int help_main(int argc, char *argv[]);
 extern int exit_main(int argc, char *argv[]);
 
-#ifdef INCLUDE_FUNCTION_TABLE
 extern OPTIONS asn1parse_options[];
 extern OPTIONS ca_options[];
 extern OPTIONS ciphers_options[];
@@ -109,10 +109,13 @@ extern OPTIONS ts_options[];
 extern OPTIONS verify_options[];
 extern OPTIONS version_options[];
 extern OPTIONS x509_options[];
+extern OPTIONS rehash_options[];
 extern OPTIONS list_options[];
 extern OPTIONS help_options[];
 extern OPTIONS exit_options[];
-FUNCTION functions[] = {
+
+#ifdef INCLUDE_FUNCTION_TABLE
+static FUNCTION functions[] = {
     { FT_general, "asn1parse", asn1parse_main, asn1parse_options },
     { FT_general, "ca", ca_main, ca_options },
 #if !defined(OPENSSL_NO_SOCK)
@@ -193,6 +196,7 @@ FUNCTION functions[] = {
     { FT_general, "verify", verify_main, verify_options },
     { FT_general, "version", version_main, version_options },
     { FT_general, "x509", x509_main, x509_options },
+    { FT_general, "rehash", rehash_main, rehash_options },
     { FT_general, "list", list_main, list_options },
     { FT_general, "help", help_main, help_options },
     { FT_general, "exit", exit_main, exit_options },

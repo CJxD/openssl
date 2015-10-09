@@ -131,8 +131,8 @@ int verify_depth = 0;
 int verify_quiet = 0;
 int verify_error = X509_V_OK;
 int verify_return_error = 0;
-unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
-int cookie_initialized = 0;
+static unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
+static int cookie_initialized = 0;
 
 static const char *lookup(int val, const STRINT_PAIR* list, const char* def)
 {
@@ -715,6 +715,9 @@ static STRINT_PAIR tlsext_types[] = {
     {"application layer protocol negotiation",
      TLSEXT_TYPE_application_layer_protocol_negotiation},
 #endif
+#ifdef TLSEXT_TYPE_extended_master_secret
+    {"extended master secret", TLSEXT_TYPE_extended_master_secret},
+#endif
     {NULL}
 };
 
@@ -803,7 +806,7 @@ int generate_cookie_callback(SSL *ssl, unsigned char *cookie,
     return 1;
 }
 
-int verify_cookie_callback(SSL *ssl, unsigned char *cookie,
+int verify_cookie_callback(SSL *ssl, const unsigned char *cookie,
                            unsigned int cookie_len)
 {
     unsigned char *buffer, result[EVP_MAX_MD_SIZE];
@@ -991,14 +994,7 @@ static int ssl_excert_prepend(SSL_EXCERT **pexc)
 {
     SSL_EXCERT *exc = app_malloc(sizeof(*exc), "prepend cert");
 
-    exc->certfile = NULL;
-    exc->keyfile = NULL;
-    exc->chainfile = NULL;
-    exc->cert = NULL;
-    exc->key = NULL;
-    exc->chain = NULL;
-    exc->prev = NULL;
-    exc->build_chain = 0;
+    memset(exc, 0, sizeof(*exc));
 
     exc->next = *pexc;
     *pexc = exc;
@@ -1388,13 +1384,14 @@ static int security_callback_debug(SSL *s, SSL_CTX *ctx,
         }
         break;
 #endif
-
+#ifndef OPENSSL_NO_DH
     case SSL_SECOP_OTHER_DH:
         {
             DH *dh = other;
             BIO_printf(sdb->out, "%d", BN_num_bits(dh->p));
             break;
         }
+#endif
     case SSL_SECOP_OTHER_CERT:
         {
             if (cert_md) {

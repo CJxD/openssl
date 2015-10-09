@@ -60,6 +60,7 @@
 #include "e_os.h"
 
 #ifndef OPENSSL_NO_DH
+#include <openssl/dh.h>
 /* DH parameters from RFC5114 */
 
 # if BN_BITS2 == 64
@@ -247,7 +248,8 @@ static const BN_ULONG dh2048_256_q[] = {
 
 /* Macro to make a BIGNUM from static data */
 
-# define make_dh_bn(x) const BIGNUM _bignum_##x = { (BN_ULONG *) x, \
+# define make_dh_bn(x) extern const BIGNUM _bignum_##x; \
+                       const BIGNUM _bignum_##x = { (BN_ULONG *) x, \
                         OSSL_NELEM(x),\
                         OSSL_NELEM(x),\
                         0, BN_FLG_STATIC_DATA };

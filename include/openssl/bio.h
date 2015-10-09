@@ -178,6 +178,8 @@ extern "C" {
 
 # define BIO_CTRL_DGRAM_GET_MTU_OVERHEAD   49
 
+# define BIO_CTRL_DGRAM_SET_PEEK_MODE      50
+
 # ifndef OPENSSL_NO_SCTP
 /* SCTP stuff */
 #  define BIO_CTRL_DGRAM_SCTP_SET_IN_HANDSHAKE    50
@@ -631,11 +633,10 @@ int BIO_asn1_set_suffix(BIO *b, asn1_ps_func *suffix,
 int BIO_asn1_get_suffix(BIO *b, asn1_ps_func **psuffix,
                         asn1_ps_func **psuffix_free);
 
-# ifndef OPENSSL_NO_STDIO
 BIO_METHOD *BIO_s_file(void);
 BIO *BIO_new_file(const char *filename, const char *mode);
+# ifndef OPENSSL_NO_STDIO
 BIO *BIO_new_fp(FILE *stream, int close_flag);
-#  define BIO_s_file_internal    BIO_s_file
 # endif
 BIO *BIO_new(BIO_METHOD *type);
 int BIO_set(BIO *a, BIO_METHOD *type);

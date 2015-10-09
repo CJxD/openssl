@@ -121,7 +121,13 @@
 #if !defined(OPENSSL_SYS_WIN32) && !defined(OPENSSL_SYS_WINCE) && !defined(NETWARE_CLIB)
 # include <strings.h>
 #endif
-#include <sys/types.h>
+#ifndef NO_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+#ifndef OPENSSL_NO_POSIX_IO
+# include <sys/stat.h>
+# include <fcntl.h>
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <openssl/err.h>
@@ -221,11 +227,17 @@ int app_init(long mesgwin)
 }
 #endif
 
-int ctx_set_verify_locations(SSL_CTX *ctx,
-                             const char *CAfile, const char *CApath)
+int ctx_set_verify_locations(SSL_CTX *ctx, const char *CAfile,
+                             const char *CApath, int noCAfile, int noCApath)
 {
-    if (CAfile == NULL && CApath == NULL)
-        return SSL_CTX_set_default_verify_paths(ctx);
+    if (CAfile == NULL && CApath == NULL) {
+        if (!noCAfile && SSL_CTX_set_default_verify_file(ctx) <= 0)
+            return 0;
+        if (!noCApath && SSL_CTX_set_default_verify_dir(ctx) <= 0)
+            return 0;
+
+        return 1;
+    }
     return SSL_CTX_load_verify_locations(ctx, CAfile, CApath);
 }
 
@@ -464,7 +476,7 @@ static char *app_get_pass(char *arg, int keepbio)
             pwdbio = BIO_push(btmp, pwdbio);
 #endif
         } else if (strcmp(arg, "stdin") == 0) {
-            pwdbio = dup_bio_in();
+            pwdbio = dup_bio_in(FORMAT_TEXT);
             if (!pwdbio) {
                 BIO_printf(bio_err, "Can't open BIO for stdin\n");
                 return NULL;
@@ -514,7 +526,7 @@ CONF *app_load_config(const char *filename)
     BIO *in;
     CONF *conf;
 
-    in = bio_open_default(filename, "r");
+    in = bio_open_default(filename, 'r', FORMAT_TEXT);
     if (in == NULL)
         return NULL;
 
@@ -527,7 +539,7 @@ CONF *app_load_config_quiet(const char *filename)
     BIO *in;
     CONF *conf;
 
-    in = bio_open_default_quiet(filename, "r");
+    in = bio_open_default_quiet(filename, 'r', FORMAT_TEXT);
     if (in == NULL)
         return NULL;
 
@@ -681,9 +693,9 @@ X509 *load_cert(const char *file, int format,
 
     if (file == NULL) {
         unbuffer(stdin);
-        cert = dup_bio_in();
+        cert = dup_bio_in(format);
     } else
-        cert = bio_open_default(file, RB(format));
+        cert = bio_open_default(file, 'r', format);
     if (cert == NULL)
         goto end;
 
@@ -718,7 +730,7 @@ X509_CRL *load_crl(const char *infile, int format)
         return x;
     }
 
-    in = bio_open_default(infile, RB(format));
+    in = bio_open_default(infile, 'r', format);
     if (in == NULL)
         goto end;
     if (format == FORMAT_ASN1)
@@ -770,9 +782,9 @@ EVP_PKEY *load_key(const char *file, int format, int maybe_stdin,
 #endif
     if (file == NULL && maybe_stdin) {
         unbuffer(stdin);
-        key = dup_bio_in();
+        key = dup_bio_in(format);
     } else
-        key = bio_open_default(file, RB(format));
+        key = bio_open_default(file, 'r', format);
     if (key == NULL)
         goto end;
     if (format == FORMAT_ASN1) {
@@ -808,13 +820,6 @@ EVP_PKEY *load_key(const char *file, int format, int maybe_stdin,
     return (pkey);
 }
 
-static const char *key_file_format(int format)
-{
-    if (format == FORMAT_PEM || format == FORMAT_PEMRSA)
-        return "r";
-    return "rb";
-}
-
 EVP_PKEY *load_pubkey(const char *file, int format, int maybe_stdin,
                       const char *pass, ENGINE *e, const char *key_descrip)
 {
@@ -840,9 +845,9 @@ EVP_PKEY *load_pubkey(const char *file, int format, int maybe_stdin,
 #endif
     if (file == NULL && maybe_stdin) {
         unbuffer(stdin);
-        key = dup_bio_in();
+        key = dup_bio_in(format);
     } else
-        key = bio_open_default(file, key_file_format(format));
+        key = bio_open_default(file, 'r', format);
     if (key == NULL)
         goto end;
     if (format == FORMAT_ASN1) {
@@ -909,7 +914,7 @@ static int load_certs_crls(const char *file, int format,
         return 0;
     }
 
-    bio = bio_open_default(file, "r");
+    bio = bio_open_default(file, 'r', FORMAT_PEM);
     if (bio == NULL)
         return 0;
 
@@ -1075,7 +1080,11 @@ int set_name_ex(unsigned long *flags, const char *arg)
         {"ca_default", XN_FLAG_MULTILINE, 0xffffffffL},
         {NULL, 0, 0}
     };
-    return set_multi_opts(flags, arg, ex_tbl);
+    if (set_multi_opts(flags, arg, ex_tbl) == 0)
+        return 0;
+    if ((*flags & XN_FLAG_SEP_MASK) == 0)
+        *flags |= XN_FLAG_SEP_CPLUS_SPC;
+    return 1;
 }
 
 int set_ext_copy(int *copy_type, const char *arg)
@@ -1241,34 +1250,39 @@ void print_array(BIO *out, const char* title, int len, const unsigned char* d)
     BIO_printf(out, "\n};\n");
 }
 
-X509_STORE *setup_verify(char *CAfile, char *CApath)
+X509_STORE *setup_verify(char *CAfile, char *CApath, int noCAfile, int noCApath)
 {
     X509_STORE *store = X509_STORE_new();
     X509_LOOKUP *lookup;
 
     if (!store)
         goto end;
-    lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
-    if (lookup == NULL)
-        goto end;
-    if (CAfile) {
-        if (!X509_LOOKUP_load_file(lookup, CAfile, X509_FILETYPE_PEM)) {
-            BIO_printf(bio_err, "Error loading file %s\n", CAfile);
-            goto end;
-        }
-    } else
-        X509_LOOKUP_load_file(lookup, NULL, X509_FILETYPE_DEFAULT);
 
-    lookup = X509_STORE_add_lookup(store, X509_LOOKUP_hash_dir());
-    if (lookup == NULL)
-        goto end;
-    if (CApath) {
-        if (!X509_LOOKUP_add_dir(lookup, CApath, X509_FILETYPE_PEM)) {
-            BIO_printf(bio_err, "Error loading directory %s\n", CApath);
+    if(CAfile != NULL || !noCAfile) {
+        lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
+        if (lookup == NULL)
             goto end;
-        }
-    } else
-        X509_LOOKUP_add_dir(lookup, NULL, X509_FILETYPE_DEFAULT);
+        if (CAfile) {
+            if (!X509_LOOKUP_load_file(lookup, CAfile, X509_FILETYPE_PEM)) {
+                BIO_printf(bio_err, "Error loading file %s\n", CAfile);
+                goto end;
+            }
+        } else
+            X509_LOOKUP_load_file(lookup, NULL, X509_FILETYPE_DEFAULT);
+    }
+
+    if(CApath != NULL || !noCApath) {
+        lookup = X509_STORE_add_lookup(store, X509_LOOKUP_hash_dir());
+        if (lookup == NULL)
+            goto end;
+        if (CApath) {
+            if (!X509_LOOKUP_add_dir(lookup, CApath, X509_FILETYPE_PEM)) {
+                BIO_printf(bio_err, "Error loading directory %s\n", CApath);
+                goto end;
+            }
+        } else
+            X509_LOOKUP_add_dir(lookup, NULL, X509_FILETYPE_DEFAULT);
+    }
 
     ERR_clear_error();
     return store;
@@ -2714,3 +2728,162 @@ int raw_write_stdout(const void *buf, int siz)
     return write(fileno(stdout), buf, siz);
 }
 #endif
+
+/*
+ * Centralized handling if input and output files with format specification
+ * The format is meant to show what the input and output is supposed to be,
+ * and is therefore a show of intent more than anything else.  However, it
+ * does impact behavior on some platform, such as differentiating between
+ * text and binary input/output on non-Unix platforms
+ */
+static int istext(int format)
+{
+    return (format & B_FORMAT_TEXT) == B_FORMAT_TEXT;
+}
+
+BIO *dup_bio_in(int format)
+{
+    return BIO_new_fp(stdin,
+                      BIO_NOCLOSE | (istext(format) ? BIO_FP_TEXT : 0));
+}
+
+BIO *dup_bio_out(int format)
+{
+    BIO *b = BIO_new_fp(stdout,
+                        BIO_NOCLOSE | (istext(format) ? BIO_FP_TEXT : 0));
+#ifdef OPENSSL_SYS_VMS
+    if (istext(format))
+        b = BIO_push(BIO_new(BIO_f_linebuffer()), b);
+#endif
+    return b;
+}
+
+void unbuffer(FILE *fp)
+{
+    setbuf(fp, NULL);
+}
+
+static const char *modestr(char mode, int format)
+{
+    OPENSSL_assert(mode == 'a' || mode == 'r' || mode == 'w');
+
+    switch (mode) {
+    case 'a':
+        return istext(format) ? "a" : "ab";
+    case 'r':
+        return istext(format) ? "r" : "rb";
+    case 'w':
+        return istext(format) ? "w" : "wb";
+    }
+    /* The assert above should make sure we never reach this point */
+    return NULL;
+}
+
+static const char *modeverb(char mode)
+{
+    switch (mode) {
+    case 'a':
+        return "appending";
+    case 'r':
+        return "reading";
+    case 'w':
+        return "writing";
+    }
+    return "(doing something)";
+}
+
+/*
+ * Open a file for writing, owner-read-only.
+ */
+BIO *bio_open_owner(const char *filename, int format, int private)
+{
+    FILE *fp = NULL;
+    BIO *b = NULL;
+    int fd = -1, bflags, mode, binmode;
+
+    if (!private || filename == NULL || strcmp(filename, "-") == 0)
+        return bio_open_default(filename, 'w', format);
+
+    mode = O_WRONLY;
+#ifdef O_CREAT
+    mode |= O_CREAT;
+#endif
+#ifdef O_TRUNC
+    mode |= O_TRUNC;
+#endif
+    binmode = istext(format);
+    if (binmode) {
+#ifdef O_BINARY
+        mode |= O_BINARY;
+#elif defined(_O_BINARY)
+        mode |= _O_BINARY;
+#endif
+    }
+
+    fd = open(filename, mode, 0600);
+    if (fd < 0)
+        goto err;
+    fp = fdopen(fd, modestr('w', format));
+    if (fp == NULL)
+        goto err;
+    bflags = BIO_CLOSE;
+    if (!binmode)
+        bflags |= BIO_FP_TEXT;
+    b = BIO_new_fp(fp, bflags);
+    if (b)
+        return b;
+
+ err:
+    BIO_printf(bio_err, "%s: Can't open \"%s\" for writing, %s\n",
+               opt_getprog(), filename, strerror(errno));
+    ERR_print_errors(bio_err);
+    /* If we have fp, then fdopen took over fd, so don't close both. */
+    if (fp)
+        fclose(fp);
+    else if (fd >= 0)
+        close(fd);
+    return NULL;
+}
+
+static BIO *bio_open_default_(const char *filename, char mode, int format,
+                              int quiet)
+{
+    BIO *ret;
+
+    if (filename == NULL || strcmp(filename, "-") == 0) {
+        ret = mode == 'r' ? dup_bio_in(format) : dup_bio_out(format);
+        if (quiet) {
+            ERR_clear_error();
+            return ret;
+        }
+        if (ret != NULL)
+            return ret;
+        BIO_printf(bio_err,
+                   "Can't open %s, %s\n",
+                   mode == 'r' ? "stdin" : "stdout", strerror(errno));
+    } else {
+        ret = BIO_new_file(filename, modestr(mode, format));
+        if (quiet) {
+            ERR_clear_error();
+            return ret;
+        }
+        if (ret != NULL)
+            return ret;
+        BIO_printf(bio_err,
+                   "Can't open %s for %s, %s\n",
+                   filename, modeverb(mode), strerror(errno));
+    }
+    ERR_print_errors(bio_err);
+    return NULL;
+}
+
+BIO *bio_open_default(const char *filename, char mode, int format)
+{
+    return bio_open_default_(filename, mode, format, 0);
+}
+
+BIO *bio_open_default_quiet(const char *filename, char mode, int format)
+{
+    return bio_open_default_(filename, mode, format, 1);
+}
+

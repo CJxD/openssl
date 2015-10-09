@@ -89,7 +89,9 @@
  * this is no longer automatic in ENGINE_load_builtin_engines().
  */
 #define TEST_ENG_OPENSSL_RC4
+#ifndef OPENSSL_NO_STDIO
 #define TEST_ENG_OPENSSL_PKEY
+#endif
 /* #define TEST_ENG_OPENSSL_HMAC */
 /* #define TEST_ENG_OPENSSL_HMAC_INIT */
 /* #define TEST_ENG_OPENSSL_RC4_OTHERS */
@@ -425,13 +427,10 @@ typedef struct {
 static int ossl_hmac_init(EVP_PKEY_CTX *ctx)
 {
     OSSL_HMAC_PKEY_CTX *hctx;
-    hctx = OPENSSL_malloc(sizeof(*hctx));
+
+    hctx = OPENSSL_zalloc(sizeof(*hctx));
     if (!hctx)
         return 0;
-    hctx->md = NULL;
-    hctx->ktmp.data = NULL;
-    hctx->ktmp.length = 0;
-    hctx->ktmp.flags = 0;
     hctx->ktmp.type = V_ASN1_OCTET_STRING;
     HMAC_CTX_init(&hctx->ctx);
     EVP_PKEY_CTX_set_data(ctx, hctx);

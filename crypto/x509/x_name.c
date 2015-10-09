@@ -1,4 +1,4 @@
-/* crypto/asn1/x_name.c */
+/* crypto/x509/x_name.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -102,11 +102,11 @@ IMPLEMENT_ASN1_DUP_FUNCTION(X509_NAME_ENTRY)
 
 ASN1_ITEM_TEMPLATE(X509_NAME_ENTRIES) =
         ASN1_EX_TEMPLATE_TYPE(ASN1_TFLG_SET_OF, 0, RDNS, X509_NAME_ENTRY)
-ASN1_ITEM_TEMPLATE_END(X509_NAME_ENTRIES)
+static_ASN1_ITEM_TEMPLATE_END(X509_NAME_ENTRIES)
 
 ASN1_ITEM_TEMPLATE(X509_NAME_INTERNAL) =
         ASN1_EX_TEMPLATE_TYPE(ASN1_TFLG_SEQUENCE_OF, 0, Name, X509_NAME_ENTRIES)
-ASN1_ITEM_TEMPLATE_END(X509_NAME_INTERNAL)
+static_ASN1_ITEM_TEMPLATE_END(X509_NAME_INTERNAL)
 
 /*
  * Normally that's where it would end: we'd have two nested STACK structures
@@ -115,7 +115,7 @@ ASN1_ITEM_TEMPLATE_END(X509_NAME_INTERNAL)
  * convert to the external form.
  */
 
-const ASN1_EXTERN_FUNCS x509_name_ff = {
+static const ASN1_EXTERN_FUNCS x509_name_ff = {
     NULL,
     x509_name_ex_new,
     x509_name_ex_free,
@@ -133,7 +133,7 @@ IMPLEMENT_ASN1_DUP_FUNCTION(X509_NAME)
 
 static int x509_name_ex_new(ASN1_VALUE **val, const ASN1_ITEM *it)
 {
-    X509_NAME *ret = OPENSSL_malloc(sizeof(*ret));
+    X509_NAME *ret = OPENSSL_zalloc(sizeof(*ret));
 
     if (!ret)
         goto memerr;
@@ -141,8 +141,6 @@ static int x509_name_ex_new(ASN1_VALUE **val, const ASN1_ITEM *it)
         goto memerr;
     if ((ret->bytes = BUF_MEM_new()) == NULL)
         goto memerr;
-    ret->canon_enc = NULL;
-    ret->canon_enclen = 0;
     ret->modified = 1;
     *val = (ASN1_VALUE *)ret;
     return 1;
@@ -515,4 +513,60 @@ int X509_NAME_set(X509_NAME **xn, X509_NAME *name)
         }
     }
     return (*xn != NULL);
+}
+
+int X509_NAME_print(BIO *bp, X509_NAME *name, int obase)
+{
+    char *s, *c, *b;
+    int l, i;
+
+    l = 80 - 2 - obase;
+
+    b = X509_NAME_oneline(name, NULL, 0);
+    if (!b)
+        return 0;
+    if (!*b) {
+        OPENSSL_free(b);
+        return 1;
+    }
+    s = b + 1;                  /* skip the first slash */
+
+    c = s;
+    for (;;) {
+#ifndef CHARSET_EBCDIC
+        if (((*s == '/') &&
+             ((s[1] >= 'A') && (s[1] <= 'Z') && ((s[2] == '=') ||
+                                                 ((s[2] >= 'A')
+                                                  && (s[2] <= 'Z')
+                                                  && (s[3] == '='))
+              ))) || (*s == '\0'))
+#else
+        if (((*s == '/') &&
+             (isupper(s[1]) && ((s[2] == '=') ||
+                                (isupper(s[2]) && (s[3] == '='))
+              ))) || (*s == '\0'))
+#endif
+        {
+            i = s - c;
+            if (BIO_write(bp, c, i) != i)
+                goto err;
+            c = s + 1;          /* skip following slash */
+            if (*s != '\0') {
+                if (BIO_write(bp, ", ", 2) != 2)
+                    goto err;
+            }
+            l--;
+        }
+        if (*s == '\0')
+            break;
+        s++;
+        l--;
+    }
+
+    OPENSSL_free(b);
+    return 1;
+ err:
+    X509err(X509_F_X509_NAME_PRINT, ERR_R_BUF_LIB);
+    OPENSSL_free(b);
+    return 0;
 }

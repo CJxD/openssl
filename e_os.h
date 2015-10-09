@@ -76,6 +76,12 @@ extern "C" {
 #  undef REF_PRINT
 #  define REF_PRINT(a,b)  fprintf(stderr,"%08X:%4d:%s\n",(int)b,b->references,a)
 # endif
+# if defined(OPENSSL_NO_STDIO) && defined(REF_CHECK)
+#  error "Cannot have REF_CHECK with no-stdio"
+# endif
+# if defined(OPENSSL_NO_STDIO) && defined(REF_PRINT)
+#  error "Cannot have REF_PRINT with no-stdio"
+# endif
 
 # ifndef DEVRANDOM
 /*
@@ -112,7 +118,7 @@ extern "C" {
 #  define MSDOS
 # endif
 
-# if defined(MSDOS) && !defined(GETPID_IS_MEANINGLESS)
+# if (defined(MSDOS) || defined(OPENSSL_SYS_UEFI)) && !defined(GETPID_IS_MEANINGLESS)
 #  define GETPID_IS_MEANINGLESS
 # endif
 
@@ -471,7 +477,9 @@ struct servent *PASCAL getservbyname(const char *, const char *);
 /*
  * Even though sizeof(SOCKET) is 8, it's safe to cast it to int, because
  * the value constitutes an index in per-process table of limited size
- * and not a real pointer.
+ * and not a real pointer. And we also depend on fact that all processors
+ * Windows run on happen to be two's-complement, which allows to
+ * interchange INVALID_SOCKET and -1.
  */
 #     define socket(d,t,p)   ((int)socket(d,t,p))
 #     define accept(s,f,l)   ((int)accept(s,f,l))

@@ -167,13 +167,12 @@ int SSL_get_ex_data_X509_STORE_CTX_idx(void)
 
 CERT *ssl_cert_new(void)
 {
-    CERT *ret = OPENSSL_malloc(sizeof(*ret));
+    CERT *ret = OPENSSL_zalloc(sizeof(*ret));
 
     if (ret == NULL) {
         SSLerr(SSL_F_SSL_CERT_NEW, ERR_R_MALLOC_FAILURE);
         return (NULL);
     }
-    memset(ret, 0, sizeof(*ret));
 
     ret->key = &(ret->pkeys[SSL_PKEY_RSA_ENC]);
     ret->references = 1;
@@ -185,7 +184,7 @@ CERT *ssl_cert_new(void)
 
 CERT *ssl_cert_dup(CERT *cert)
 {
-    CERT *ret = OPENSSL_malloc(sizeof(*ret));
+    CERT *ret = OPENSSL_zalloc(sizeof(*ret));
     int i;
 
     if (ret == NULL) {
@@ -193,8 +192,7 @@ CERT *ssl_cert_dup(CERT *cert)
         return (NULL);
     }
 
-    memset(ret, 0, sizeof(*ret));
-
+    ret->references = 1;
     ret->key = &ret->pkeys[cert->key - cert->pkeys];
 
 #ifndef OPENSSL_NO_RSA
@@ -250,7 +248,7 @@ CERT *ssl_cert_dup(CERT *cert)
         CERT_PKEY *rpk = ret->pkeys + i;
         if (cpk->x509 != NULL) {
             rpk->x509 = cpk->x509;
-            CRYPTO_add(&rpk->x509->references, 1, CRYPTO_LOCK_X509);
+            X509_up_ref(rpk->x509);
         }
 
         if (cpk->privatekey != NULL) {
@@ -281,7 +279,6 @@ CERT *ssl_cert_dup(CERT *cert)
         }
     }
 
-    ret->references = 1;
     /* Configured sigalgs copied across */
     if (cert->conf_sigalgs) {
         ret->conf_sigalgs = OPENSSL_malloc(cert->conf_sigalgslen);
@@ -336,6 +333,12 @@ CERT *ssl_cert_dup(CERT *cert)
         goto err;
     if (!custom_exts_copy(&ret->srv_ext, &cert->srv_ext))
         goto err;
+
+    if (cert->psk_identity_hint) {
+        ret->psk_identity_hint = BUF_strdup(cert->psk_identity_hint);
+        if (ret->psk_identity_hint == NULL)
+            goto err;
+    }
 
     return (ret);
 
@@ -405,6 +408,9 @@ void ssl_cert_free(CERT *c)
     X509_STORE_free(c->chain_store);
     custom_exts_free(&c->cli_ext);
     custom_exts_free(&c->srv_ext);
+#ifndef OPENSSL_NO_PSK
+    OPENSSL_free(c->psk_identity_hint);
+#endif
     OPENSSL_free(c);
 }
 
@@ -463,7 +469,7 @@ int ssl_cert_add1_chain_cert(SSL *s, SSL_CTX *ctx, X509 *x)
 {
     if (!ssl_cert_add0_chain_cert(s, ctx, x))
         return 0;
-    CRYPTO_add(&x->references, 1, CRYPTO_LOCK_X509);
+    X509_up_ref(x);
     return 1;
 }
 
@@ -666,7 +672,6 @@ static int xname_cmp(const X509_NAME *const *a, const X509_NAME *const *b)
     return (X509_NAME_cmp(*a, *b));
 }
 
-#ifndef OPENSSL_NO_STDIO
 /**
  * Load CA certs from a file into a ::STACK. Note that it is somewhat misnamed;
  * it doesn't really have anything to do with clients (except that a common use
@@ -684,7 +689,7 @@ STACK_OF(X509_NAME) *SSL_load_client_CA_file(const char *file)
 
     sk = sk_X509_NAME_new(xname_cmp);
 
-    in = BIO_new(BIO_s_file_internal());
+    in = BIO_new(BIO_s_file());
 
     if ((sk == NULL) || (in == NULL)) {
         SSLerr(SSL_F_SSL_LOAD_CLIENT_CA_FILE, ERR_R_MALLOC_FAILURE);
@@ -730,7 +735,6 @@ STACK_OF(X509_NAME) *SSL_load_client_CA_file(const char *file)
         ERR_clear_error();
     return (ret);
 }
-#endif
 
 /**
  * Add a file of certs to a stack.
@@ -752,7 +756,7 @@ int SSL_add_file_cert_subjects_to_stack(STACK_OF(X509_NAME) *stack,
 
     oldcmp = sk_X509_NAME_set_cmp_func(stack, xname_cmp);
 
-    in = BIO_new(BIO_s_file_internal());
+    in = BIO_new(BIO_s_file());
 
     if (in == NULL) {
         SSLerr(SSL_F_SSL_ADD_FILE_CERT_SUBJECTS_TO_STACK,
@@ -1031,8 +1035,7 @@ int ssl_build_cert_chain(SSL *s, SSL_CTX *ctx, int flags)
         if (sk_X509_num(chain) > 0) {
             /* See if last cert is self signed */
             x = sk_X509_value(chain, sk_X509_num(chain) - 1);
-            X509_check_purpose(x, -1, 0);
-            if (x->ex_flags & EXFLAG_SS) {
+            if (X509_get_extension_flags(x) & EXFLAG_SS) {
                 x = sk_X509_pop(chain);
                 X509_free(x);
             }

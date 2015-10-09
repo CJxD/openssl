@@ -66,23 +66,16 @@ X509_PKEY *X509_PKEY_new(void)
 {
     X509_PKEY *ret = NULL;
 
-    ret = OPENSSL_malloc(sizeof(*ret));
+    ret = OPENSSL_zalloc(sizeof(*ret));
     if (!ret)
         goto err;
-    memset(ret, 0, sizeof(*ret));
 
-    ret->version = 0;
+    ret->references = 1;
     ret->enc_algor = X509_ALGOR_new();
     ret->enc_pkey = ASN1_OCTET_STRING_new();
     if (!ret->enc_algor || !ret->enc_pkey)
         goto err;
-    ret->dec_pkey = NULL;
-    ret->key_length = 0;
-    ret->key_data = NULL;
-    ret->key_free = 0;
-    ret->cipher.cipher = NULL;
-    memset(ret->cipher.iv, 0, EVP_MAX_IV_LENGTH);
-    ret->references = 1;
+
     return ret;
 err:
     X509_PKEY_free(ret);

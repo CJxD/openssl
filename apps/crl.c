@@ -70,8 +70,8 @@ typedef enum OPTION_choice {
     OPT_INFORM, OPT_IN, OPT_OUTFORM, OPT_OUT, OPT_KEYFORM, OPT_KEY,
     OPT_ISSUER, OPT_LASTUPDATE, OPT_NEXTUPDATE, OPT_FINGERPRINT,
     OPT_CRLNUMBER, OPT_BADSIG, OPT_GENDELTA, OPT_CAPATH, OPT_CAFILE,
-    OPT_VERIFY, OPT_TEXT, OPT_HASH, OPT_HASH_OLD, OPT_NOOUT,
-    OPT_NAMEOPT, OPT_MD
+    OPT_NOCAPATH, OPT_NOCAFILE, OPT_VERIFY, OPT_TEXT, OPT_HASH, OPT_HASH_OLD,
+    OPT_NOOUT, OPT_NAMEOPT, OPT_MD
 } OPTION_CHOICE;
 
 OPTIONS crl_options[] = {
@@ -92,6 +92,10 @@ OPTIONS crl_options[] = {
     {"gendelta", OPT_GENDELTA, '<'},
     {"CApath", OPT_CAPATH, '/', "Verify CRL using certificates in dir"},
     {"CAfile", OPT_CAFILE, '<', "Verify CRL using certificates in file name"},
+    {"no-CAfile", OPT_NOCAFILE, '-',
+     "Do not load the default certificates file"},
+    {"no-CApath", OPT_NOCAPATH, '-',
+     "Do not load certificates from the default certificates directory"},
     {"verify", OPT_VERIFY, '-'},
     {"text", OPT_TEXT, '-', "Print out a text format version"},
     {"hash", OPT_HASH, '-', "Print hash value"},
@@ -121,7 +125,7 @@ int crl_main(int argc, char **argv)
     int hash = 0, issuer = 0, lastupdate = 0, nextupdate = 0, noout = 0;
     int informat = FORMAT_PEM, outformat = FORMAT_PEM, keyformat = FORMAT_PEM;
     int ret = 1, num = 0, badsig = 0, fingerprint = 0, crlnumber = 0;
-    int text = 0, do_ver = 0;
+    int text = 0, do_ver = 0, noCAfile = 0, noCApath = 0;
     int i;
 #ifndef OPENSSL_NO_MD5
     int hash_old = 0;
@@ -170,6 +174,12 @@ int crl_main(int argc, char **argv)
         case OPT_CAFILE:
             CAfile = opt_arg();
             do_ver = 1;
+            break;
+        case OPT_NOCAPATH:
+            noCApath =  1;
+            break;
+        case OPT_NOCAFILE:
+            noCAfile =  1;
             break;
         case OPT_HASH_OLD:
 #ifndef OPENSSL_NO_MD5
@@ -230,7 +240,7 @@ int crl_main(int argc, char **argv)
         goto end;
 
     if (do_ver) {
-        if ((store = setup_verify(CAfile, CApath)) == NULL)
+        if ((store = setup_verify(CAfile, CApath, noCAfile, noCApath)) == NULL)
             goto end;
         lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
         if (lookup == NULL)
@@ -346,7 +356,7 @@ int crl_main(int argc, char **argv)
             }
         }
     }
-    out = bio_open_default(outfile, "w");
+    out = bio_open_default(outfile, 'w', outformat);
     if (out == NULL)
         goto end;
 
@@ -358,8 +368,13 @@ int crl_main(int argc, char **argv)
         goto end;
     }
 
-    if (badsig)
-        x->signature->data[x->signature->length - 1] ^= 0x1;
+    if (badsig) {
+        ASN1_BIT_STRING *sig;
+        unsigned char *psig;
+        X509_CRL_get0_signature(&sig, NULL, x);
+        psig = ASN1_STRING_data(sig);
+        psig[ASN1_STRING_length(sig) - 1] ^= 0x1;
+    }
 
     if (outformat == FORMAT_ASN1)
         i = (int)i2d_X509_CRL_bio(out, x);

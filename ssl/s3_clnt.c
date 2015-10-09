@@ -167,9 +167,7 @@ static int ssl_set_version(SSL *s);
 static int ca_dn_cmp(const X509_NAME *const *a, const X509_NAME *const *b);
 static int ssl3_check_change(SSL *s);
 static int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
-                                    unsigned char *p,
-                                    int (*put_cb) (const SSL_CIPHER *,
-                                                 unsigned char *));
+                                    unsigned char *p);
 
 
 int ssl3_connect(SSL *s)
@@ -862,7 +860,7 @@ int ssl3_client_hello(SSL *s)
         }
 
         /* Ciphers supported */
-        i = ssl_cipher_list_to_bytes(s, SSL_get_ciphers(s), &(p[2]), 0);
+        i = ssl_cipher_list_to_bytes(s, SSL_get_ciphers(s), &(p[2]));
         if (i == 0) {
             SSLerr(SSL_F_SSL3_CLIENT_HELLO, SSL_R_NO_CIPHERS_AVAILABLE);
             goto err;
@@ -930,9 +928,11 @@ int ssl3_get_server_hello(SSL *s)
 {
     STACK_OF(SSL_CIPHER) *sk;
     const SSL_CIPHER *c;
-    unsigned char *p, *d;
+    PACKET pkt, session_id;
+    size_t session_id_len;
+    unsigned char *cipherchars;
     int i, al = SSL_AD_INTERNAL_ERROR, ok;
-    unsigned int j;
+    unsigned int compression;
     long n;
 #ifndef OPENSSL_NO_COMP
     SSL_COMP *comp;
@@ -971,10 +971,20 @@ int ssl3_get_server_hello(SSL *s)
         goto f_err;
     }
 
-    d = p = (unsigned char *)s->init_msg;
+    if (!PACKET_buf_init(&pkt, s->init_msg, n)) {
+        al = SSL_AD_INTERNAL_ERROR;
+        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, ERR_R_INTERNAL_ERROR);
+        goto f_err;
+    }
 
     if (s->method->version == TLS_ANY_VERSION) {
-        int sversion = (p[0] << 8) | p[1];
+        unsigned int sversion;
+
+        if (!PACKET_get_net_2(&pkt, &sversion)) {
+            al = SSL_AD_DECODE_ERROR;
+            SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
 
 #if TLS_MAX_VERSION != TLS1_2_VERSION
 #error Code needs updating for new TLS version
@@ -1012,8 +1022,16 @@ int ssl3_get_server_hello(SSL *s)
         }
     } else if (s->method->version == DTLS_ANY_VERSION) {
         /* Work out correct protocol version to use */
-        int hversion = (p[0] << 8) | p[1];
-        int options = s->options;
+        unsigned int hversion;
+        int options;
+
+        if (!PACKET_get_net_2(&pkt, &hversion)) {
+            al = SSL_AD_DECODE_ERROR;
+            SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
+
+        options = s->options;
         if (hversion == DTLS1_2_VERSION && !(options & SSL_OP_NO_DTLSv1_2))
             s->method = DTLSv1_2_client_method();
         else if (tls1_suiteb(s)) {
@@ -1031,27 +1049,50 @@ int ssl3_get_server_hello(SSL *s)
             goto f_err;
         }
         s->session->ssl_version = s->version = s->method->version;
-    } else if ((p[0] != (s->version >> 8)) || (p[1] != (s->version & 0xff))) {
-        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_WRONG_SSL_VERSION);
-        s->version = (s->version & 0xff00) | p[1];
-        al = SSL_AD_PROTOCOL_VERSION;
-        goto f_err;
+    } else {
+        unsigned char *vers;
+
+        if (!PACKET_get_bytes(&pkt, &vers, 2)) {
+            al = SSL_AD_DECODE_ERROR;
+            SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
+        if ((vers[0] != (s->version >> 8))
+                || (vers[1] != (s->version & 0xff))) {
+            SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_WRONG_SSL_VERSION);
+            s->version = (s->version & 0xff00) | vers[1];
+            al = SSL_AD_PROTOCOL_VERSION;
+            goto f_err;
+        }
     }
-    p += 2;
 
     /* load the server hello data */
     /* load the server random */
-    memcpy(s->s3->server_random, p, SSL3_RANDOM_SIZE);
-    p += SSL3_RANDOM_SIZE;
+    if (!PACKET_copy_bytes(&pkt, s->s3->server_random, SSL3_RANDOM_SIZE)) {
+        al = SSL_AD_DECODE_ERROR;
+        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+        goto f_err;
+    }
 
     s->hit = 0;
 
-    /* get the session-id */
-    j = *(p++);
-
-    if ((j > sizeof s->session->session_id) || (j > SSL3_SESSION_ID_SIZE)) {
+    /* Get the session-id. */
+    if (!PACKET_get_length_prefixed_1(&pkt, &session_id)) {
+        al = SSL_AD_DECODE_ERROR;
+        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+        goto f_err;
+    }
+    session_id_len = PACKET_remaining(&session_id);
+    if (session_id_len > sizeof s->session->session_id
+        || session_id_len > SSL3_SESSION_ID_SIZE) {
         al = SSL_AD_ILLEGAL_PARAMETER;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_SSL3_SESSION_ID_TOO_LONG);
+        goto f_err;
+    }
+
+    if (!PACKET_get_bytes(&pkt, &cipherchars, TLS_CIPHER_LEN)) {
+        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+        al = SSL_AD_DECODE_ERROR;
         goto f_err;
     }
 
@@ -1076,7 +1117,7 @@ int ssl3_get_server_hello(SSL *s)
                                      NULL, &pref_cipher,
                                      s->tls_session_secret_cb_arg)) {
             s->session->cipher = pref_cipher ?
-                pref_cipher : ssl_get_cipher_by_char(s, p + j);
+                pref_cipher : ssl_get_cipher_by_char(s, cipherchars);
         } else {
             SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, ERR_R_INTERNAL_ERROR);
             al = SSL_AD_INTERNAL_ERROR;
@@ -1084,8 +1125,9 @@ int ssl3_get_server_hello(SSL *s)
         }
     }
 
-    if (j != 0 && j == s->session->session_id_length
-        && memcmp(p, s->session->session_id, j) == 0) {
+    if (session_id_len != 0 && session_id_len == s->session->session_id_length
+        && memcmp(PACKET_data(&session_id), s->session->session_id,
+                  session_id_len) == 0) {
         if (s->sid_ctx_length != s->session->sid_ctx_length
             || memcmp(s->session->sid_ctx, s->sid_ctx, s->sid_ctx_length)) {
             /* actually a client application bug */
@@ -1108,11 +1150,14 @@ int ssl3_get_server_hello(SSL *s)
                 goto f_err;
             }
         }
-        s->session->session_id_length = j;
-        memcpy(s->session->session_id, p, j); /* j could be 0 */
+
+        s->session->session_id_length = session_id_len;
+        /* session_id_len could be 0 */
+        memcpy(s->session->session_id, PACKET_data(&session_id),
+               session_id_len);
     }
-    p += j;
-    c = ssl_get_cipher_by_char(s, p);
+
+    c = ssl_get_cipher_by_char(s, cipherchars);
     if (c == NULL) {
         /* unknown cipher */
         al = SSL_AD_ILLEGAL_PARAMETER;
@@ -1133,7 +1178,6 @@ int ssl3_get_server_hello(SSL *s)
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_WRONG_CIPHER_RETURNED);
         goto f_err;
     }
-    p += ssl_put_cipher_by_char(s, NULL, NULL);
 
     sk = ssl_get_ciphers_by_id(s);
     i = sk_SSL_CIPHER_find(sk, c);
@@ -1166,8 +1210,13 @@ int ssl3_get_server_hello(SSL *s)
         goto f_err;
     /* lets get the compression algorithm */
     /* COMPRESSION */
+    if (!PACKET_get_1(&pkt, &compression)) {
+        SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_LENGTH_MISMATCH);
+        al = SSL_AD_DECODE_ERROR;
+        goto f_err;
+    }
 #ifdef OPENSSL_NO_COMP
-    if (*(p++) != 0) {
+    if (compression != 0) {
         al = SSL_AD_ILLEGAL_PARAMETER;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO,
                SSL_R_UNSUPPORTED_COMPRESSION_ALGORITHM);
@@ -1182,23 +1231,23 @@ int ssl3_get_server_hello(SSL *s)
         goto f_err;
     }
 #else
-    j = *(p++);
-    if (s->hit && j != s->session->compress_meth) {
+    if (s->hit && compression != s->session->compress_meth) {
         al = SSL_AD_ILLEGAL_PARAMETER;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO,
                SSL_R_OLD_SESSION_COMPRESSION_ALGORITHM_NOT_RETURNED);
         goto f_err;
     }
-    if (j == 0)
+    if (compression == 0)
         comp = NULL;
     else if (!ssl_allow_compression(s)) {
         al = SSL_AD_ILLEGAL_PARAMETER;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_COMPRESSION_DISABLED);
         goto f_err;
-    } else
-        comp = ssl3_comp_find(s->ctx->comp_methods, j);
+    } else {
+        comp = ssl3_comp_find(s->ctx->comp_methods, compression);
+    }
 
-    if ((j != 0) && (comp == NULL)) {
+    if (compression != 0 && comp == NULL) {
         al = SSL_AD_ILLEGAL_PARAMETER;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO,
                SSL_R_UNSUPPORTED_COMPRESSION_ALGORITHM);
@@ -1209,12 +1258,12 @@ int ssl3_get_server_hello(SSL *s)
 #endif
 
     /* TLS extensions */
-    if (!ssl_parse_serverhello_tlsext(s, &p, d, n)) {
+    if (!ssl_parse_serverhello_tlsext(s, &pkt)) {
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_PARSE_TLSEXT);
         goto err;
     }
 
-    if (p != (d + n)) {
+    if (PACKET_remaining(&pkt) != 0) {
         /* wrong packet length */
         al = SSL_AD_DECODE_ERROR;
         SSLerr(SSL_F_SSL3_GET_SERVER_HELLO, SSL_R_BAD_PACKET_LENGTH);
@@ -1359,7 +1408,7 @@ int ssl3_get_server_certificate(SSL *s)
     s->session->peer_type = i;
 
     X509_free(s->session->peer);
-    CRYPTO_add(&x->references, 1, CRYPTO_LOCK_X509);
+    X509_up_ref(x);
     s->session->peer = x;
     s->session->verify_result = s->verify_result;
 
@@ -1384,9 +1433,8 @@ int ssl3_get_key_exchange(SSL *s)
     unsigned char *q, md_buf[EVP_MAX_MD_SIZE * 2];
 #endif
     EVP_MD_CTX md_ctx;
-    unsigned char *param, *p;
-    int al, j, ok;
-    long i, param_len, n, alg_k, alg_a;
+    int al, j, verify_ret, ok;
+    long n, alg_k, alg_a;
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
 #ifndef OPENSSL_NO_RSA
@@ -1400,8 +1448,8 @@ int ssl3_get_key_exchange(SSL *s)
     BN_CTX *bn_ctx = NULL;
     EC_POINT *srvr_ecpoint = NULL;
     int curve_nid = 0;
-    int encoded_pt_len = 0;
 #endif
+    PACKET pkt, save_param_start, signature;
 
     EVP_MD_CTX_init(&md_ctx);
 
@@ -1433,7 +1481,12 @@ int ssl3_get_key_exchange(SSL *s)
         return (1);
     }
 
-    param = p = (unsigned char *)s->init_msg;
+    if (!PACKET_buf_init(&pkt, s->init_msg, n)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_INTERNAL_ERROR);
+            al = SSL_AD_INTERNAL_ERROR;
+            goto f_err;
+    }
+    save_param_start = pkt;
 
 #ifndef OPENSSL_NO_RSA
     RSA_free(s->s3->peer_rsa_tmp);
@@ -1448,9 +1501,6 @@ int ssl3_get_key_exchange(SSL *s)
     s->s3->peer_ecdh_tmp = NULL;
 #endif
 
-    /* Total length of the parameters including the length prefix */
-    param_len = 0;
-
     alg_a = s->s3->tmp.new_cipher->algorithm_auth;
 
     al = SSL_AD_DECODE_ERROR;
@@ -1458,13 +1508,11 @@ int ssl3_get_key_exchange(SSL *s)
 #ifndef OPENSSL_NO_PSK
     /* PSK ciphersuites are preceded by an identity hint */
     if (alg_k & SSL_PSK) {
-
-        param_len = 2;
-        if (param_len > n) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
+        PACKET psk_identity_hint;
+        if (!PACKET_get_length_prefixed_2(&pkt, &psk_identity_hint)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
             goto f_err;
         }
-        n2s(p, i);
 
         /*
          * Store PSK identity hint for later use, hint is used in
@@ -1472,32 +1520,17 @@ int ssl3_get_key_exchange(SSL *s)
          * a PSK identity hint can be as long as the maximum length of a PSK
          * identity.
          */
-        if (i > PSK_MAX_IDENTITY_LEN) {
+        if (PACKET_remaining(&psk_identity_hint) > PSK_MAX_IDENTITY_LEN) {
             al = SSL_AD_HANDSHAKE_FAILURE;
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_DATA_LENGTH_TOO_LONG);
             goto f_err;
         }
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,
-                   SSL_R_BAD_PSK_IDENTITY_HINT_LENGTH);
+
+        if (!PACKET_strndup(&psk_identity_hint,
+                            &s->session->psk_identity_hint)) {
+            al = SSL_AD_INTERNAL_ERROR;
             goto f_err;
         }
-        param_len += i;
-
-        OPENSSL_free(s->session->psk_identity_hint);
-        if (i != 0) {
-            s->session->psk_identity_hint = BUF_strndup((char *)p, i);
-            if (s->session->psk_identity_hint == NULL) {
-                al = SSL_AD_HANDSHAKE_FAILURE;
-                SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_MALLOC_FAILURE);
-                goto f_err;
-            }
-        } else {
-            s->session->psk_identity_hint = NULL;
-        }
-
-        p += i;
-        n -= param_len;
     }
 
     /* Nothing else to do for plain PSK or RSAPSK */
@@ -1506,86 +1539,30 @@ int ssl3_get_key_exchange(SSL *s)
 #endif                          /* !OPENSSL_NO_PSK */
 #ifndef OPENSSL_NO_SRP
     if (alg_k & SSL_kSRP) {
-        param_len = 2;
-        if (param_len > n) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
+        PACKET prime, generator, salt, server_pub;
+        if (!PACKET_get_length_prefixed_2(&pkt, &prime)
+            || !PACKET_get_length_prefixed_2(&pkt, &generator)
+            || !PACKET_get_length_prefixed_1(&pkt, &salt)
+            || !PACKET_get_length_prefixed_2(&pkt, &server_pub)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
             goto f_err;
         }
-        n2s(p, i);
 
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SRP_N_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((s->srp_ctx.N = BN_bin2bn(p, i, NULL)) == NULL) {
+        if ((s->srp_ctx.N =
+             BN_bin2bn(PACKET_data(&prime),
+                       PACKET_remaining(&prime), NULL)) == NULL
+            || (s->srp_ctx.g =
+                BN_bin2bn(PACKET_data(&generator),
+                          PACKET_remaining(&generator), NULL)) == NULL
+            || (s->srp_ctx.s =
+                BN_bin2bn(PACKET_data(&salt),
+                          PACKET_remaining(&salt), NULL)) == NULL
+            || (s->srp_ctx.B =
+                BN_bin2bn(PACKET_data(&server_pub),
+                          PACKET_remaining(&server_pub), NULL)) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
             goto err;
         }
-        p += i;
-
-        if (2 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 2;
-
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SRP_G_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((s->srp_ctx.g = BN_bin2bn(p, i, NULL)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-
-        if (1 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 1;
-
-        i = (unsigned int)(p[0]);
-        p++;
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SRP_S_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((s->srp_ctx.s = BN_bin2bn(p, i, NULL)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-
-        if (2 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 2;
-
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SRP_B_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((s->srp_ctx.B = BN_bin2bn(p, i, NULL)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-        n -= param_len;
 
         if (!srp_verify_server_param(s, &al)) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SRP_PARAMETERS);
@@ -1599,56 +1576,32 @@ int ssl3_get_key_exchange(SSL *s)
 #endif                          /* !OPENSSL_NO_SRP */
 #ifndef OPENSSL_NO_RSA
     if (alg_k & SSL_kRSA) {
+        PACKET mod, exp;
         /* Temporary RSA keys only allowed in export ciphersuites */
         if (!SSL_C_IS_EXPORT(s->s3->tmp.new_cipher)) {
             al = SSL_AD_UNEXPECTED_MESSAGE;
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_UNEXPECTED_MESSAGE);
             goto f_err;
         }
+
+        if (!PACKET_get_length_prefixed_2(&pkt, &mod)
+            || !PACKET_get_length_prefixed_2(&pkt, &exp)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
+
         if ((rsa = RSA_new()) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_MALLOC_FAILURE);
             goto err;
         }
 
-        param_len = 2;
-        if (param_len > n) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_RSA_MODULUS_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((rsa->n = BN_bin2bn(p, i, rsa->n)) == NULL) {
+        if ((rsa->n = BN_bin2bn(PACKET_data(&mod), PACKET_remaining(&mod),
+                                rsa->n)) == NULL
+            || (rsa->e = BN_bin2bn(PACKET_data(&exp), PACKET_remaining(&exp),
+                                   rsa->e)) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
             goto err;
         }
-        p += i;
-
-        if (2 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 2;
-
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_RSA_E_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((rsa->e = BN_bin2bn(p, i, rsa->e)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-        n -= param_len;
 
         /* this should be because we are using an export cipher */
         if (alg_a & SSL_aRSA)
@@ -1672,84 +1625,33 @@ int ssl3_get_key_exchange(SSL *s)
 #endif
 #ifndef OPENSSL_NO_DH
     else if (alg_k & (SSL_kDHE | SSL_kDHEPSK)) {
+        PACKET prime, generator, pub_key;
+
+        if (!PACKET_get_length_prefixed_2(&pkt, &prime)
+            || !PACKET_get_length_prefixed_2(&pkt, &generator)
+            || !PACKET_get_length_prefixed_2(&pkt, &pub_key)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
+
         if ((dh = DH_new()) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_DH_LIB);
             goto err;
         }
 
-        param_len = 2;
-        if (param_len > n) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_P_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((dh->p = BN_bin2bn(p, i, NULL)) == NULL) {
+        if ((dh->p = BN_bin2bn(PACKET_data(&prime),
+                               PACKET_remaining(&prime), NULL)) == NULL
+            || (dh->g = BN_bin2bn(PACKET_data(&generator),
+                                  PACKET_remaining(&generator), NULL)) == NULL
+            || (dh->pub_key =
+                BN_bin2bn(PACKET_data(&pub_key),
+                          PACKET_remaining(&pub_key), NULL)) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
             goto err;
         }
-        p += i;
 
-        if (BN_is_zero(dh->p)) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_P_VALUE);
-            goto f_err;
-        }
-
-
-        if (2 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 2;
-
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_G_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((dh->g = BN_bin2bn(p, i, NULL)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-
-        if (BN_is_zero(dh->g)) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_G_VALUE);
-            goto f_err;
-        }
-
-        if (2 > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
-            goto f_err;
-        }
-        param_len += 2;
-
-        n2s(p, i);
-
-        if (i > n - param_len) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_PUB_KEY_LENGTH);
-            goto f_err;
-        }
-        param_len += i;
-
-        if ((dh->pub_key = BN_bin2bn(p, i, NULL)) == NULL) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_BN_LIB);
-            goto err;
-        }
-        p += i;
-        n -= param_len;
-
-        if (BN_is_zero(dh->pub_key)) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_PUB_KEY_VALUE);
+        if (BN_is_zero(dh->p) || BN_is_zero(dh->g) || BN_is_zero(dh->pub_key)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_DH_VALUE);
             goto f_err;
         }
 
@@ -1771,6 +1673,8 @@ int ssl3_get_key_exchange(SSL *s)
     else if (alg_k & (SSL_kECDHE | SSL_kECDHEPSK)) {
         EC_GROUP *ngroup;
         const EC_GROUP *group;
+        PACKET encoded_pt;
+        unsigned char *ecparams;
 
         if ((ecdh = EC_KEY_new()) == NULL) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_MALLOC_FAILURE);
@@ -1779,17 +1683,10 @@ int ssl3_get_key_exchange(SSL *s)
 
         /*
          * Extract elliptic curve parameters and the server's ephemeral ECDH
-         * public key. Keep accumulating lengths of various components in
-         * param_len and make sure it never exceeds n.
+         * public key. For now we only support named (not generic) curves and
+         * ECParameters in this case is just three bytes.
          */
-
-        /*
-         * XXX: For now we only support named (not generic) curves and the
-         * ECParameters in this case is just three bytes. We also need one
-         * byte for the length of the encoded point
-         */
-        param_len = 4;
-        if (param_len > n) {
+        if (!PACKET_get_bytes(&pkt, &ecparams, 3)) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
             goto f_err;
         }
@@ -1797,12 +1694,12 @@ int ssl3_get_key_exchange(SSL *s)
          * Check curve is one of our preferences, if not server has sent an
          * invalid curve. ECParameters is 3 bytes.
          */
-        if (!tls1_check_curve(s, p, 3)) {
+        if (!tls1_check_curve(s, ecparams, 3)) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_WRONG_CURVE);
             goto f_err;
         }
 
-        if ((curve_nid = tls1_ec_curve_id2nid(*(p + 2))) == 0) {
+        if ((curve_nid = tls1_ec_curve_id2nid(*(ecparams + 2))) == 0) {
             al = SSL_AD_INTERNAL_ERROR;
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,
                    SSL_R_UNABLE_TO_FIND_ECDH_PARAMETERS);
@@ -1830,8 +1727,6 @@ int ssl3_get_key_exchange(SSL *s)
             goto f_err;
         }
 
-        p += 3;
-
         /* Next, get the encoded ECPoint */
         if (((srvr_ecpoint = EC_POINT_new(group)) == NULL) ||
             ((bn_ctx = BN_CTX_new()) == NULL)) {
@@ -1839,19 +1734,16 @@ int ssl3_get_key_exchange(SSL *s)
             goto err;
         }
 
-        encoded_pt_len = *p;    /* length of encoded point */
-        p += 1;
+        if (!PACKET_get_length_prefixed_1(&pkt, &encoded_pt)) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
+            goto f_err;
+        }
 
-        if ((encoded_pt_len > n - param_len) ||
-            (EC_POINT_oct2point(group, srvr_ecpoint,
-                                p, encoded_pt_len, bn_ctx) == 0)) {
+        if (EC_POINT_oct2point(group, srvr_ecpoint, PACKET_data(&encoded_pt),
+                               PACKET_remaining(&encoded_pt), bn_ctx) == 0) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_ECPOINT);
             goto f_err;
         }
-        param_len += encoded_pt_len;
-
-        n -= param_len;
-        p += encoded_pt_len;
 
         /*
          * The ECC/TLS specification does not mention the use of DSA to sign
@@ -1882,17 +1774,29 @@ int ssl3_get_key_exchange(SSL *s)
     }
 #endif                          /* !OPENSSL_NO_EC */
 
-    /* p points to the next byte, there are 'n' bytes left */
-
     /* if it was signed, check the signature */
     if (pkey != NULL) {
+        PACKET params;
+        /*
+         * |pkt| now points to the beginning of the signature, so the difference
+         * equals the length of the parameters.
+         */
+        if (!PACKET_get_sub_packet(&save_param_start, &params,
+                                   PACKET_remaining(&save_param_start) -
+                                   PACKET_remaining(&pkt))) {
+            al = SSL_AD_INTERNAL_ERROR;
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_INTERNAL_ERROR);
+            goto f_err;
+        }
+
         if (SSL_USE_SIGALGS(s)) {
+            unsigned char *sigalgs;
             int rv;
-            if (2 > n) {
+            if (!PACKET_get_bytes(&pkt, &sigalgs, 2)) {
                 SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
                 goto f_err;
             }
-            rv = tls12_check_peer_sigalg(&md, s, p, pkey);
+            rv = tls12_check_peer_sigalg(&md, s, sigalgs, pkey);
             if (rv == -1)
                 goto err;
             else if (rv == 0) {
@@ -1901,23 +1805,25 @@ int ssl3_get_key_exchange(SSL *s)
 #ifdef SSL_DEBUG
             fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 #endif
-            p += 2;
-            n -= 2;
-        } else
+        } else {
             md = EVP_sha1();
+        }
 
-        if (2 > n) {
-            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_TOO_SHORT);
+        if (!PACKET_get_length_prefixed_2(&pkt, &signature)
+            || PACKET_remaining(&pkt) != 0) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_LENGTH_MISMATCH);
             goto f_err;
         }
-        n2s(p, i);
-        n -= 2;
         j = EVP_PKEY_size(pkey);
+        if (j < 0) {
+            SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, ERR_R_INTERNAL_ERROR);
+            goto f_err;
+        }
 
         /*
-         * Check signature length. If n is 0 then signature is empty
+         * Check signature length
          */
-        if ((i != n) || (n > j) || (n <= 0)) {
+        if (PACKET_remaining(&signature) > (size_t)j) {
             /* wrong packet length */
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_WRONG_SIGNATURE_LENGTH);
             goto f_err;
@@ -1937,18 +1843,21 @@ int ssl3_get_key_exchange(SSL *s)
                                  SSL3_RANDOM_SIZE);
                 EVP_DigestUpdate(&md_ctx, &(s->s3->server_random[0]),
                                  SSL3_RANDOM_SIZE);
-                EVP_DigestUpdate(&md_ctx, param, param_len);
+                EVP_DigestUpdate(&md_ctx, PACKET_data(&params),
+                                 PACKET_remaining(&params));
                 EVP_DigestFinal_ex(&md_ctx, q, &size);
                 q += size;
                 j += size;
             }
-            i = RSA_verify(NID_md5_sha1, md_buf, j, p, n, pkey->pkey.rsa);
-            if (i < 0) {
+            verify_ret =
+                RSA_verify(NID_md5_sha1, md_buf, j, PACKET_data(&signature),
+                           PACKET_remaining(&signature), pkey->pkey.rsa);
+            if (verify_ret < 0) {
                 al = SSL_AD_DECRYPT_ERROR;
                 SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_RSA_DECRYPT);
                 goto f_err;
             }
-            if (i == 0) {
+            if (verify_ret == 0) {
                 /* bad signature */
                 al = SSL_AD_DECRYPT_ERROR;
                 SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SIGNATURE);
@@ -1962,8 +1871,10 @@ int ssl3_get_key_exchange(SSL *s)
                              SSL3_RANDOM_SIZE);
             EVP_VerifyUpdate(&md_ctx, &(s->s3->server_random[0]),
                              SSL3_RANDOM_SIZE);
-            EVP_VerifyUpdate(&md_ctx, param, param_len);
-            if (EVP_VerifyFinal(&md_ctx, p, (int)n, pkey) <= 0) {
+            EVP_VerifyUpdate(&md_ctx, PACKET_data(&params),
+                             PACKET_remaining(&params));
+            if (EVP_VerifyFinal(&md_ctx, PACKET_data(&signature),
+                                PACKET_remaining(&signature), pkey) <= 0) {
                 /* bad signature */
                 al = SSL_AD_DECRYPT_ERROR;
                 SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_BAD_SIGNATURE);
@@ -1980,7 +1891,7 @@ int ssl3_get_key_exchange(SSL *s)
             goto err;
         }
         /* still data left over */
-        if (n != 0) {
+        if (PACKET_remaining(&pkt) != 0) {
             SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE, SSL_R_EXTRA_DATA_IN_MESSAGE);
             goto f_err;
         }
@@ -2178,6 +2089,7 @@ int ssl3_get_new_session_ticket(SSL *s)
 {
     int ok, al, ret = 0;
     unsigned int ticklen;
+    unsigned long ticket_lifetime_hint;
     long n;
     PACKET pkt;
 
@@ -2194,6 +2106,18 @@ int ssl3_get_new_session_ticket(SSL *s)
         SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET, ERR_R_INTERNAL_ERROR);
         goto f_err;
     }
+
+    if (!PACKET_get_net_4(&pkt, &ticket_lifetime_hint)
+            || !PACKET_get_net_2(&pkt, &ticklen)
+            || PACKET_remaining(&pkt) != ticklen) {
+        al = SSL_AD_DECODE_ERROR;
+        SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET, SSL_R_LENGTH_MISMATCH);
+        goto f_err;
+    }
+
+    /* Server is allowed to change its mind and send an empty ticket. */
+    if (ticklen == 0)
+        return 1;
 
     if (s->session->session_id_length > 0) {
         int i = s->session_ctx->session_cache_mode;
@@ -2226,15 +2150,9 @@ int ssl3_get_new_session_ticket(SSL *s)
         s->session = new_sess;
     }
 
-    if (!PACKET_get_net_4(&pkt, &s->session->tlsext_tick_lifetime_hint)
-            || !PACKET_get_net_2(&pkt, &ticklen)
-            || PACKET_remaining(&pkt) != ticklen) {
-        al = SSL_AD_DECODE_ERROR;
-        SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET, SSL_R_LENGTH_MISMATCH);
-        goto f_err;
-    }
     OPENSSL_free(s->session->tlsext_tick);
     s->session->tlsext_ticklen = 0;
+
     s->session->tlsext_tick = OPENSSL_malloc(ticklen);
     if (!s->session->tlsext_tick) {
         SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET, ERR_R_MALLOC_FAILURE);
@@ -2245,6 +2163,8 @@ int ssl3_get_new_session_ticket(SSL *s)
         SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET, SSL_R_LENGTH_MISMATCH);
         goto f_err;
     }
+
+    s->session->tlsext_tick_lifetime_hint = ticket_lifetime_hint;
     s->session->tlsext_ticklen = ticklen;
     /*
      * There are two ways to detect a resumed ticket session. One is to set
@@ -3479,9 +3399,7 @@ int ssl_do_client_cert_cb(SSL *s, X509 **px509, EVP_PKEY **ppkey)
 }
 
 int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
-                             unsigned char *p,
-                             int (*put_cb) (const SSL_CIPHER *,
-                                            unsigned char *))
+                             unsigned char *p)
 {
     int i, j = 0;
     SSL_CIPHER *c;
@@ -3493,8 +3411,6 @@ int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
     if (sk == NULL)
         return (0);
     q = p;
-    if (put_cb == NULL)
-        put_cb = s->method->put_cipher_by_char;
 
     for (i = 0; i < sk_SSL_CIPHER_num(sk); i++) {
         c = sk_SSL_CIPHER_value(sk, i);
@@ -3509,7 +3425,7 @@ int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
                 empty_reneg_info_scsv = 0;
         }
 #endif
-        j = put_cb(c, p);
+        j = s->method->put_cipher_by_char(c, p);
         p += j;
     }
     /*
@@ -3521,7 +3437,7 @@ int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
             static SSL_CIPHER scsv = {
                 0, NULL, SSL3_CK_SCSV, 0, 0, 0, 0, 0, 0, 0, 0, 0
             };
-            j = put_cb(&scsv, p);
+            j = s->method->put_cipher_by_char(&scsv, p);
             p += j;
 #ifdef OPENSSL_RI_DEBUG
             fprintf(stderr,
@@ -3532,7 +3448,7 @@ int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
             static SSL_CIPHER scsv = {
                 0, NULL, SSL3_CK_FALLBACK_SCSV, 0, 0, 0, 0, 0, 0, 0, 0, 0
             };
-            j = put_cb(&scsv, p);
+            j = s->method->put_cipher_by_char(&scsv, p);
             p += j;
         }
     }

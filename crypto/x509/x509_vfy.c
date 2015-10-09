@@ -69,6 +69,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/objects.h>
+#include "internal/x509_int.h"
 #include "x509_lcl.h"
 
 /* CRL score values */
@@ -172,7 +173,7 @@ static X509 *lookup_cert_match(X509_STORE_CTX *ctx, X509 *x)
             break;
     }
     if (i < sk_X509_num(certs))
-        CRYPTO_add(&xtmp->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(xtmp);
     else
         xtmp = NULL;
     sk_X509_pop_free(certs, X509_free);
@@ -212,7 +213,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
         X509err(X509_F_X509_VERIFY_CERT, ERR_R_MALLOC_FAILURE);
         goto end;
     }
-    CRYPTO_add(&ctx->cert->references, 1, CRYPTO_LOCK_X509);
+    X509_up_ref(ctx->cert);
     ctx->last_untrusted = 1;
 
     /* We use a temporary STACK so we can chop and hack at it */
@@ -243,7 +244,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
         if (ctx->param->flags & X509_V_FLAG_TRUSTED_FIRST) {
             ok = ctx->get_issuer(&xtmp, ctx, x);
             if (ok < 0)
-                return ok;
+                goto end;
             /*
              * If successful for now free up cert so it will be picked up
              * again later.
@@ -262,7 +263,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
                     X509err(X509_F_X509_VERIFY_CERT, ERR_R_MALLOC_FAILURE);
                     goto end;
                 }
-                CRYPTO_add(&xtmp->references, 1, CRYPTO_LOCK_X509);
+                X509_up_ref(xtmp);
                 (void)sk_X509_delete_ptr(sktmp, xtmp);
                 ctx->last_untrusted++;
                 x = xtmp;
@@ -341,7 +342,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
             ok = ctx->get_issuer(&xtmp, ctx, x);
 
             if (ok < 0)
-                return ok;
+                goto end;
             if (ok == 0)
                 break;
             x = xtmp;
@@ -484,6 +485,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
     if (!ok)
         goto end;
 
+#ifndef OPENSSL_NO_RFC3779
     /* RFC 3779 path validation, now that CRL check has been done */
     ok = v3_asid_validate_path(ctx);
     if (!ok)
@@ -491,6 +493,7 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
     ok = v3_addr_validate_path(ctx);
     if (!ok)
         goto end;
+#endif
 
     /* If we get this far evaluate policies */
     if (!bad_chain && (ctx->param->flags & X509_V_FLAG_POLICY_CHECK))
@@ -566,7 +569,7 @@ static int get_issuer_sk(X509 **issuer, X509_STORE_CTX *ctx, X509 *x)
 {
     *issuer = find_issuer(ctx, ctx->other_ctx, x);
     if (*issuer) {
-        CRYPTO_add(&(*issuer)->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(*issuer);
         return 1;
     } else
         return 0;
@@ -767,6 +770,10 @@ static int check_hosts(X509 *x, X509_VERIFY_PARAM_ID *id)
     int n = sk_OPENSSL_STRING_num(id->hosts);
     char *name;
 
+    if (id->peername != NULL) {
+        OPENSSL_free(id->peername);
+        id->peername = NULL;
+    }
     for (i = 0; i < n; ++i) {
         name = sk_OPENSSL_STRING_value(id->hosts, i);
         if (X509_check_host(x, name, 0, id->hostflags, &id->peername) > 0)
@@ -950,6 +957,8 @@ static int check_crl_time(X509_STORE_CTX *ctx, X509_CRL *crl, int notify)
         ctx->current_crl = crl;
     if (ctx->param->flags & X509_V_FLAG_USE_CHECK_TIME)
         ptime = &ctx->param->check_time;
+    else if (ctx->param->flags & X509_V_FLAG_NO_CHECK_TIME)
+        return 1;
     else
         ptime = NULL;
 
@@ -1025,7 +1034,7 @@ static int get_crl_sk(X509_STORE_CTX *ctx, X509_CRL **pcrl, X509_CRL **pdcrl,
         *pissuer = best_crl_issuer;
         *pscore = best_score;
         *preasons = best_reasons;
-        CRYPTO_add(&best_crl->references, 1, CRYPTO_LOCK_X509_CRL);
+        X509_CRL_up_ref(best_crl);
         X509_CRL_free(*pdcrl);
         *pdcrl = NULL;
         get_delta_sk(ctx, pdcrl, pscore, best_crl, crls);
@@ -1123,7 +1132,7 @@ static void get_delta_sk(X509_STORE_CTX *ctx, X509_CRL **dcrl, int *pscore,
         if (check_delta_base(delta, base)) {
             if (check_crl_time(ctx, delta, 0))
                 *pscore |= CRL_SCORE_TIME_DELTA;
-            CRYPTO_add(&delta->references, 1, CRYPTO_LOCK_X509_CRL);
+            X509_CRL_up_ref(delta);
             *dcrl = delta;
             return;
         }
@@ -1670,6 +1679,8 @@ int x509_check_cert_time(X509_STORE_CTX *ctx, X509 *x, int quiet)
 
     if (ctx->param->flags & X509_V_FLAG_USE_CHECK_TIME)
         ptime = &ctx->param->check_time;
+    else if (ctx->param->flags & X509_V_FLAG_NO_CHECK_TIME)
+        return 1;
     else
         ptime = NULL;
 
@@ -2254,13 +2265,12 @@ int X509_STORE_CTX_purpose_inherit(X509_STORE_CTX *ctx, int def_purpose,
 
 X509_STORE_CTX *X509_STORE_CTX_new(void)
 {
-    X509_STORE_CTX *ctx = OPENSSL_malloc(sizeof(*ctx));
+    X509_STORE_CTX *ctx = OPENSSL_zalloc(sizeof(*ctx));
 
     if (!ctx) {
         X509err(X509_F_X509_STORE_CTX_NEW, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
-    memset(ctx, 0, sizeof(*ctx));
     return ctx;
 }
 
@@ -2276,6 +2286,7 @@ int X509_STORE_CTX_init(X509_STORE_CTX *ctx, X509_STORE *store, X509 *x509,
                         STACK_OF(X509) *chain)
 {
     int ret = 1;
+
     ctx->ctx = store;
     ctx->current_method = 0;
     ctx->cert = x509;
@@ -2296,36 +2307,11 @@ int X509_STORE_CTX_init(X509_STORE_CTX *ctx, X509_STORE *store, X509 *x509,
     ctx->tree = NULL;
     ctx->parent = NULL;
 
-    ctx->param = X509_VERIFY_PARAM_new();
-
-    if (!ctx->param) {
-        X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
-        return 0;
-    }
-
-    /*
-     * Inherit callbacks and flags from X509_STORE if not set use defaults.
-     */
-
-    if (store)
-        ret = X509_VERIFY_PARAM_inherit(ctx->param, store->param);
-    else
-        ctx->param->inh_flags |= X509_VP_FLAG_DEFAULT | X509_VP_FLAG_ONCE;
-
     if (store) {
         ctx->verify_cb = store->verify_cb;
         ctx->cleanup = store->cleanup;
     } else
         ctx->cleanup = 0;
-
-    if (ret)
-        ret = X509_VERIFY_PARAM_inherit(ctx->param,
-                                        X509_VERIFY_PARAM_lookup("default"));
-
-    if (ret == 0) {
-        X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
-        return 0;
-    }
 
     if (store && store->check_issued)
         ctx->check_issued = store->check_issued;
@@ -2380,16 +2366,46 @@ int X509_STORE_CTX_init(X509_STORE_CTX *ctx, X509_STORE *store, X509 *x509,
     ctx->check_policy = check_policy;
 
     /*
+    *   For ctx->cleanup running well in X509_STORE_CTX_cleanup ,
+    *   initial all ctx before exceptional handling.
+    */
+    ctx->param = X509_VERIFY_PARAM_new();
+    if (ctx->param == NULL) {
+        X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+
+    /*
+     * Inherit callbacks and flags from X509_STORE if not set use defaults.
+     */
+    if (store)
+        ret = X509_VERIFY_PARAM_inherit(ctx->param, store->param);
+    else
+        ctx->param->inh_flags |= X509_VP_FLAG_DEFAULT | X509_VP_FLAG_ONCE;
+
+    if (ret)
+        ret = X509_VERIFY_PARAM_inherit(ctx->param,
+                                        X509_VERIFY_PARAM_lookup("default"));
+
+    if (ret == 0) {
+        X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+
+    /*
      * Since X509_STORE_CTX_cleanup does a proper "free" on the ex_data, we
      * put a corresponding "new" here.
      */
     if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509_STORE_CTX, ctx,
                             &(ctx->ex_data))) {
-        OPENSSL_free(ctx);
         X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
-        return 0;
+        goto err;
     }
     return 1;
+
+err:
+    X509_STORE_CTX_cleanup(ctx);
+    return 0;
 }
 
 /*

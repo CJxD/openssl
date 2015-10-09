@@ -63,6 +63,7 @@
 #include "internal/cryptlib.h"
 #include <openssl/conf.h>
 #include <openssl/x509.h>
+#include "internal/x509_int.h"
 #include <openssl/x509v3.h>
 
 static int v3_check_critical(char **value);
@@ -375,7 +376,7 @@ int X509V3_EXT_add_nconf(CONF *conf, X509V3_CTX *ctx, char *section,
 {
     STACK_OF(X509_EXTENSION) **sk = NULL;
     if (cert)
-        sk = &cert->cert_info->extensions;
+        sk = &cert->cert_info.extensions;
     return X509V3_EXT_add_nconf_sk(conf, ctx, section, sk);
 }
 
@@ -386,7 +387,7 @@ int X509V3_EXT_CRL_add_nconf(CONF *conf, X509V3_CTX *ctx, char *section,
 {
     STACK_OF(X509_EXTENSION) **sk = NULL;
     if (crl)
-        sk = &crl->crl->extensions;
+        sk = &crl->crl.extensions;
     return X509V3_EXT_add_nconf_sk(conf, ctx, section, sk);
 }
 

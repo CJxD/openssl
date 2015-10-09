@@ -95,7 +95,7 @@ static int cms_set_pkey_param(EVP_PKEY_CTX *pctx,
 # define SMIME_SIGN_RECEIPT      (15 | SMIME_IP | SMIME_OP)
 # define SMIME_VERIFY_RECEIPT    (16 | SMIME_IP)
 
-int verify_err = 0;
+static int verify_err = 0;
 
 typedef struct cms_key_param_st cms_key_param;
 
@@ -118,9 +118,9 @@ typedef enum OPTION_choice {
     OPT_NOSIGS, OPT_NO_CONTENT_VERIFY, OPT_NO_ATTR_VERIFY, OPT_INDEF,
     OPT_NOINDEF, OPT_NOOLDMIME, OPT_CRLFEOL, OPT_NOOUT, OPT_RR_PRINT,
     OPT_RR_ALL, OPT_RR_FIRST, OPT_RCTFORM, OPT_CERTFILE, OPT_CAFILE,
-    OPT_CAPATH, OPT_CONTENT, OPT_PRINT, OPT_SECRETKEY,
-    OPT_SECRETKEYID, OPT_PWRI_PASSWORD, OPT_ECONTENT_TYPE, OPT_RAND,
-    OPT_PASSIN, OPT_TO, OPT_FROM, OPT_SUBJECT, OPT_SIGNER, OPT_RECIP,
+    OPT_CAPATH, OPT_NOCAPATH, OPT_NOCAFILE,OPT_CONTENT, OPT_PRINT,
+    OPT_SECRETKEY, OPT_SECRETKEYID, OPT_PWRI_PASSWORD, OPT_ECONTENT_TYPE,
+    OPT_RAND, OPT_PASSIN, OPT_TO, OPT_FROM, OPT_SUBJECT, OPT_SIGNER, OPT_RECIP,
     OPT_CERTSOUT, OPT_MD, OPT_INKEY, OPT_KEYFORM, OPT_KEYOPT, OPT_RR_FROM,
     OPT_RR_TO, OPT_AES128_WRAP, OPT_AES192_WRAP, OPT_AES256_WRAP,
     OPT_3DES_WRAP, OPT_ENGINE,
@@ -185,6 +185,10 @@ OPTIONS cms_options[] = {
     {"certfile", OPT_CERTFILE, '<', "Other certificates file"},
     {"CAfile", OPT_CAFILE, '<', "Trusted certificates file"},
     {"CApath", OPT_CAPATH, '/', "trusted certificates directory"},
+    {"no-CAfile", OPT_NOCAFILE, '-',
+     "Do not load the default certificates file"},
+    {"no-CApath", OPT_NOCAPATH, '-',
+     "Do not load certificates from the default certificates directory"},
     {"content", OPT_CONTENT, '<',
      "Supply or override content for detached signature"},
     {"print", OPT_PRINT, '-'},
@@ -242,12 +246,12 @@ int cms_main(int argc, char **argv)
     X509_VERIFY_PARAM *vpm = NULL;
     char *certfile = NULL, *keyfile = NULL, *contfile = NULL;
     char *CAfile = NULL, *CApath = NULL, *certsoutfile = NULL;
+    int noCAfile = 0, noCApath = 0;
     char *infile = NULL, *outfile = NULL, *rctfile = NULL, *inrand = NULL;
     char *passinarg = NULL, *passin = NULL, *signerfile = NULL, *recipfile =
         NULL;
     char *to = NULL, *from = NULL, *subject = NULL, *prog;
     cms_key_param *key_first = NULL, *key_param = NULL;
-    const char *inmode = "r", *outmode = "w";
     int flags = CMS_DETACHED, noout = 0, print = 0, keyidx = -1, vpmtouched =
         0;
     int informat = FORMAT_SMIME, outformat = FORMAT_SMIME;
@@ -422,6 +426,12 @@ int cms_main(int argc, char **argv)
             break;
         case OPT_CAPATH:
             CApath = opt_arg();
+            break;
+        case OPT_NOCAFILE:
+            noCAfile = 1;
+            break;
+        case OPT_NOCAPATH:
+            noCApath = 1;
             break;
         case OPT_IN:
             infile = opt_arg();
@@ -689,20 +699,14 @@ int cms_main(int argc, char **argv)
     if (!(operation & SMIME_SIGNERS))
         flags &= ~CMS_DETACHED;
 
-    if (operation & SMIME_OP) {
-        if (outformat == FORMAT_ASN1)
-            outmode = "wb";
-    } else {
+    if (!(operation & SMIME_OP)) {
         if (flags & CMS_BINARY)
-            outmode = "wb";
+            outformat = FORMAT_BINARY;
     }
 
-    if (operation & SMIME_IP) {
-        if (informat == FORMAT_ASN1)
-            inmode = "rb";
-    } else {
+    if (!(operation & SMIME_IP)) {
         if (flags & CMS_BINARY)
-            inmode = "rb";
+            informat = FORMAT_BINARY;
     }
 
     if (operation == SMIME_ENCRYPT) {
@@ -772,7 +776,7 @@ int cms_main(int argc, char **argv)
             goto end;
     }
 
-    in = bio_open_default(infile, inmode);
+    in = bio_open_default(infile, 'r', informat);
     if (in == NULL)
         goto end;
 
@@ -836,12 +840,12 @@ int cms_main(int argc, char **argv)
         }
     }
 
-    out = bio_open_default(outfile, outmode);
+    out = bio_open_default(outfile, 'w', outformat);
     if (out == NULL)
         goto end;
 
     if ((operation == SMIME_VERIFY) || (operation == SMIME_VERIFY_RECEIPT)) {
-        if ((store = setup_verify(CAfile, CApath)) == NULL)
+        if ((store = setup_verify(CAfile, CApath, noCAfile, noCApath)) == NULL)
             goto end;
         X509_STORE_set_verify_cb(store, cms_cb);
         if (vpmtouched)

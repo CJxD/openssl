@@ -189,7 +189,7 @@ static int conn_state(BIO *b, BIO_CONNECT *c)
             c->state = BIO_CONN_S_CREATE_SOCKET;
 
             ret = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if (ret == INVALID_SOCKET) {
+            if (ret == (int)INVALID_SOCKET) {
                 SYSerr(SYS_F_SOCKET, get_last_socket_error());
                 ERR_add_error_data(4, "host=", c->param_hostname,
                                    ":", c->param_port);
@@ -286,19 +286,12 @@ BIO_CONNECT *BIO_CONNECT_new(void)
 {
     BIO_CONNECT *ret;
 
-    if ((ret = OPENSSL_malloc(sizeof(*ret))) == NULL)
+    if ((ret = OPENSSL_zalloc(sizeof(*ret))) == NULL)
         return (NULL);
     ret->state = BIO_CONN_S_BEFORE;
     ret->param_hostname = NULL;
     ret->param_port = NULL;
     ret->info_callback = NULL;
-    ret->nbio = 0;
-    ret->ip[0] = 0;
-    ret->ip[1] = 0;
-    ret->ip[2] = 0;
-    ret->ip[3] = 0;
-    ret->port = 0;
-    memset(&ret->them, 0, sizeof(ret->them));
     return (ret);
 }
 
@@ -320,7 +313,7 @@ BIO_METHOD *BIO_s_connect(void)
 static int conn_new(BIO *bi)
 {
     bi->init = 0;
-    bi->num = INVALID_SOCKET;
+    bi->num = (int)INVALID_SOCKET;
     bi->flags = 0;
     if ((bi->ptr = (char *)BIO_CONNECT_new()) == NULL)
         return (0);
@@ -333,12 +326,12 @@ static void conn_close_socket(BIO *bio)
     BIO_CONNECT *c;
 
     c = (BIO_CONNECT *)bio->ptr;
-    if (bio->num != INVALID_SOCKET) {
+    if (bio->num != (int)INVALID_SOCKET) {
         /* Only do a shutdown if things were established */
         if (c->state == BIO_CONN_S_OK)
             shutdown(bio->num, 2);
         closesocket(bio->num);
-        bio->num = INVALID_SOCKET;
+        bio->num = (int)INVALID_SOCKET;
     }
 }
 

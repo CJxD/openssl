@@ -29,11 +29,14 @@ LIBFIPS= -L.. -lfips
 # Prefix for logline for each test
 START= @@@ START
 
+NPTEST=		nptest
 BNTEST=		bntest
 ECTEST=		ectest
 ECDSATEST=	ecdsatest
 ECDHTEST=	ecdhtest
 EXPTEST=	exptest
+GMDIFFTEST=	gmdifftest
+PBELUTEST=	pbelutest
 IDEATEST=	ideatest
 SHA1TEST=	sha1test
 SHA256TEST=	sha256t
@@ -71,14 +74,16 @@ CONSTTIMETEST=  constant_time_test
 VERIFYEXTRATEST=	verify_extra_test
 CLIENTHELLOTEST=	clienthellotest
 PACKETTEST=	packettest
-SSLVERTOLTEST=	sslvertoltest.pl
-SSLEXTENSIONTEST=	sslextensiontest.pl
-SSLSESSIONTICKTEST= 	sslsessionticktest.pl
-SSLSKEWITH0PTEST=	sslskewith0ptest.pl
+SSLVERTOLTEST=	sslvertoltest
+SSLEXTENSIONTEST=	sslextensiontest
+SSLSESSIONTICKTEST= 	sslsessionticktest
+SSLSKEWITH0PTEST=	sslskewith0ptest
 
 TESTS=		alltests
 
-EXE=	$(BNTEST)$(EXE_EXT) $(ECTEST)$(EXE_EXT)  $(ECDSATEST)$(EXE_EXT) $(ECDHTEST)$(EXE_EXT) $(IDEATEST)$(EXE_EXT) \
+EXE=	$(NPTEST)$(EXE_EXT) $(BNTEST)$(EXE_EXT) $(ECTEST)$(EXE_EXT) \
+	$(ECDSATEST)$(EXE_EXT) $(ECDHTEST)$(EXE_EXT) $(GMDIFFTEST)$(EXE_EXT) \
+	$(PBELUTEST)$(EXE_EXT) $(IDEATEST)$(EXE_EXT) \
 	$(MD2TEST)$(EXE_EXT)  $(MD4TEST)$(EXE_EXT) $(MD5TEST)$(EXE_EXT) $(HMACTEST)$(EXE_EXT) $(WPTEST)$(EXE_EXT) \
 	$(RC2TEST)$(EXE_EXT) $(RC4TEST)$(EXE_EXT) $(RC5TEST)$(EXE_EXT) \
 	$(DESTEST)$(EXE_EXT) $(SHA1TEST)$(EXE_EXT) $(SHA256TEST)$(EXE_EXT) $(SHA512TEST)$(EXE_EXT) \
@@ -96,7 +101,8 @@ EXE=	$(BNTEST)$(EXE_EXT) $(ECTEST)$(EXE_EXT)  $(ECDSATEST)$(EXE_EXT) $(ECDHTEST)
 
 # $(METHTEST)$(EXE_EXT)
 
-OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
+OBJ=	$(NPTEST).o $(BNTEST).o $(ECTEST).o \
+	$(ECDSATEST).o $(ECDHTEST).o $(GMDIFFTEST).o $(PBELUTEST).o $(IDEATEST).o \
 	$(MD2TEST).o $(MD4TEST).o $(MD5TEST).o \
 	$(HMACTEST).o $(WPTEST).o \
 	$(RC2TEST).o $(RC4TEST).o $(RC5TEST).o \
@@ -109,7 +115,8 @@ OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
 	$(CONSTTIMETEST).o $(VERIFYEXTRATEST).o $(CLIENTHELLOTEST).o \
 	$(PACKETTEST).o testutil.o
 
-SRC=	$(BNTEST).c $(ECTEST).c  $(ECDSATEST).c $(ECDHTEST).c $(IDEATEST).c \
+SRC=	$(NPTEST).c $(BNTEST).c $(ECTEST).c \
+	$(ECDSATEST).c $(ECDHTEST).c $(GMDIFFTEST).c $(PBELUTEST).c $(IDEATEST).c \
 	$(MD2TEST).c  $(MD4TEST).c $(MD5TEST).c \
 	$(HMACTEST).c $(WPTEST).c \
 	$(RC2TEST).c $(RC4TEST).c $(RC5TEST).c \
@@ -144,304 +151,13 @@ errors:
 tags:
 	ctags $(SRC)
 
-tests:	exe apps $(TESTS)
+tests:	exe apps
+	TOP=$(TOP) PERL=$(PERL) $(PERL) run_tests.pl $(TESTS)
+list-tests:
+	@TOP=$(TOP) PERL=$(PERL) $(PERL) run_tests.pl list
 
 apps:
 	@(cd ..; $(MAKE) DIRS=apps all)
-
-alltests: \
-	test_des test_idea test_sha test_md4 test_md5 test_hmac \
-	test_md2 test_mdc2 test_wp \
-	test_rmd test_rc2 test_rc4 test_rc5 test_bf test_cast \
-	test_rand test_bn test_ec test_ecdsa test_ecdh \
-	test_enc test_x509 test_rsa test_crl test_sid \
-	test_gen test_req test_pkcs7 test_verify test_dh test_dsa \
-	test_ss test_ca test_engine test_evp test_evp_extra test_ssl test_tsa \
-	test_ige test_jpake test_secmem \
-	test_srp test_cms test_v3name test_ocsp \
-	test_gost2814789 test_heartbeat test_p5_crpt2 \
-	test_constant_time test_verify_extra test_clienthello test_packet \
-	test_sslvertol test_sslextension test_sslsessionticket test_sslskewith0p
-
-test_evp: $(EVPTEST)$(EXE_EXT) evptests.txt
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(EVPTEST) evptests.txt
-
-test_evp_extra: $(EVPEXTRATEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(EVPEXTRATEST)
-
-test_p5_crpt2: $(P5_CRPT2_TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(P5_CRPT2_TEST)
-
-test_des: $(DESTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(DESTEST)
-
-test_idea: $(IDEATEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(IDEATEST)
-
-test_sha: $(SHA1TEST)$(EXE_EXT) $(SHA256TEST)$(EXE_EXT) $(SHA512TEST)$(EXE_EXT)
-	@echo $(START) $@ -- sha1
-	../util/shlib_wrap.sh ./$(SHA1TEST)
-	@echo $(START) $@ -- sha256
-	../util/shlib_wrap.sh ./$(SHA256TEST)
-	@echo $(START) $@ -- sha512
-	../util/shlib_wrap.sh ./$(SHA512TEST)
-
-test_mdc2: $(MDC2TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(MDC2TEST)
-
-test_md5: $(MD5TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(MD5TEST)
-
-test_md4: $(MD4TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(MD4TEST)
-
-test_hmac: $(HMACTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(HMACTEST)
-
-test_wp: $(WPTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(WPTEST)
-
-test_md2: $(MD2TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(MD2TEST)
-
-test_rmd: $(RMDTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RMDTEST)
-
-test_bf: $(BFTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(BFTEST)
-
-test_cast: $(CASTTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(CASTTEST)
-
-test_rc2: $(RC2TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RC2TEST)
-
-test_rc4: $(RC4TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RC4TEST)
-
-test_rc5: $(RC5TEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RC5TEST)
-
-test_rand: $(RANDTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RANDTEST)
-
-test_gost2814789: $(GOST2814789TEST)$(EXE_EXT)
-	@echo $(START) $@
-	OPENSSL_ENGINES=../engines/ccgost ../util/shlib_wrap.sh ./$(GOST2814789TEST)
-
-test_enc: ../apps/openssl$(EXE_EXT) testenc
-	@echo $(START) $@
-	@sh ./testenc
-
-test_x509: ../apps/openssl$(EXE_EXT) tx509 testx509.pem v3-cert1.pem v3-cert2.pem
-	@echo $(START) $@ -- x509v1 certificate
-	sh ./tx509
-	@echo $(START) $@ -- first x509v3 certificate
-	sh ./tx509 v3-cert1.pem
-	@echo $(START) $@ -- second x509v3 certificate
-	sh ./tx509 v3-cert2.pem
-
-test_rsa: $(RSATEST)$(EXE_EXT) ../apps/openssl$(EXE_EXT) tkey testrsa.pem testrsapub.pem
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(RSATEST)
-	@echo $(START) $@ -- private key
-	@sh ./tkey testrsa.pem rsa private
-	@echo $(START) $@ -- public public
-	@sh ./tkey testrsapub.pem rsa public
-
-test_crl: ../apps/openssl$(EXE_EXT) tcrl testcrl.pem
-	@echo $(START) $@
-	sh ./tcrl
-
-test_sid: ../apps/openssl$(EXE_EXT) tsid testsid.pem
-	@echo $(START) $@
-	@sh ./tsid
-
-test_req: ../apps/openssl$(EXE_EXT) treq testreq.pem testreq2.pem
-	@echo $(START) $@
-	@sh ./treq
-	@echo $(START) $@ -- testreq2
-	@sh ./treq testreq2.pem
-
-test_pkcs7: ../apps/openssl$(EXE_EXT) tpkcs7 tpkcs7d testp7.pem pkcs7-1.pem
-	@echo $(START) $@ -- pkcs7
-	@sh ./tpkcs7
-	@echo $(START) $@ -- pkcs7d
-	@sh ./tpkcs7d
-
-test_bn: $(BNTEST)$(EXE_EXT) $(EXPTEST)$(EXE_EXT) bctest
-	@echo $(START) $@ -- could take  a while.
-	@../util/shlib_wrap.sh ./$(BNTEST) >tmp.bntest
-	@echo quit >>tmp.bntest
-	@echo $(START) $@ -- running bc
-	@<tmp.bntest sh -c "`sh ./bctest ignore`" | $(PERL) -e '$$i=0; while (<STDIN>) {if (/^test (.*)/) {print STDERR "\nverify $$1";} elsif (!/^0\r?$$/) {die "\nFailed! bc: $$_";} else {print STDERR "."; $$i++;}} print STDERR "\n$$i tests passed\n"'
-	@echo $(START) $@ -- $(EXPTEST)
-	../util/shlib_wrap.sh ./$(EXPTEST)
-
-test_ec: $(ECTEST)$(EXE_EXT) tkey testec-p256.pem testecpub-p256.pem
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(ECTEST)
-	@echo $(START) $@ -- private
-	@sh ./tkey testec-p256.pem ec private
-	@echo $(START) $@ -- public
-	@sh ./tkey testecpub-p256.pem ec public
-
-test_ecdsa: $(ECDSATEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(ECDSATEST)
-
-test_ecdh: $(ECDHTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(ECDHTEST)
-
-test_verify: ../apps/openssl$(EXE_EXT)
-	@echo $(START) $@ -- expect some failures and expired certificates
-	../util/shlib_wrap.sh ../apps/openssl verify -CApath ../certs/demo ../certs/demo/*.pem
-
-test_dh: $(DHTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(DHTEST)
-
-test_dsa: $(DSATEST)$(EXE_EXT) tkey testdsa.pem testdsapub.pem
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(DSATEST)
-	@echo $(START) $@ -- app2_1
-	../util/shlib_wrap.sh ./$(DSATEST) -app2_1
-	@echo $(START) $@ -- private
-	@sh ./tkey testdsa.pem dsa private
-	@echo $(START) $@ -- public
-	@sh ./tkey testdsapub.pem dsa public
-
-test_gen testreq.pem: ../apps/openssl$(EXE_EXT) testgen test.cnf
-	@echo $(START) test_gen
-	@sh ./testgen
-
-test_ss keyU.ss certU.ss certCA.ss certP1.ss keyP1.ss certP2.ss keyP2.ss \
-		intP1.ss intP2.ss: testss CAss.cnf Uss.cnf P1ss.cnf P2ss.cnf \
-                                   ../apps/openssl$(EXE_EXT)
-	@echo $(START) test_ss
-	@sh ./testss
-	@cat certCA.ss certU.ss > intP1.ss
-	@cat certCA.ss certU.ss certP1.ss > intP2.ss
-
-test_engine: $(ENGINETEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(ENGINETEST)
-
-test_ssl: keyU.ss certU.ss certCA.ss certP1.ss keyP1.ss certP2.ss keyP2.ss \
-		intP1.ss intP2.ss $(SSLTEST)$(EXE_EXT) testssl testsslproxy \
-		../apps/server2.pem serverinfo.pem
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(SSLTEST) -test_cipherlist
-	@echo $(START) $@ -- key U
-	@sh ./testssl keyU.ss certU.ss certCA.ss
-	@echo $(START) $@ -- key P1
-	@sh ./testsslproxy keyP1.ss certP1.ss intP1.ss
-	@echo $(START) $@ -- key P2
-	@sh ./testsslproxy keyP2.ss certP2.ss intP2.ss
-
-test_ca: ../apps/openssl$(EXE_EXT) testca CAss.cnf Uss.cnf
-	@if ../util/shlib_wrap.sh ../apps/openssl no-rsa; then \
-	  echo SKIP $@ -- requires RSA; \
-	else \
-	  echo $(START) $@; \
-	  sh ./testca $(PERL); \
-	fi
-
-test_tsa: ../apps/openssl$(EXE_EXT) testtsa CAtsa.cnf ../util/shlib_wrap.sh
-	@if ../util/shlib_wrap.sh ../apps/openssl no-rsa; then \
-	    echo SKIP $@ -- requires RSA; \
-	else \
-	  echo $(START) $@; \
-	  sh ./testtsa; \
-	fi
-
-test_ige: $(IGETEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(IGETEST)
-
-test_jpake: $(JPAKETEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(JPAKETEST)
-
-test_cms: ../apps/openssl$(EXE_EXT) cms-test.pl smcont.txt
-	@echo $(START) $@
-	$(PERL) cms-test.pl
-
-test_secmem: $(SECMEMTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./secmemtest
-
-test_srp: $(SRPTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./srptest
-
-test_v3name: $(V3NAMETEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(V3NAMETEST)
-
-test_ocsp: ../apps/openssl$(EXE_EXT) tocsp
-	@echo $(START) $@
-	@sh ./tocsp
-
-test_heartbeat: $(HEARTBEATTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(HEARTBEATTEST)
-
-test_constant_time: $(CONSTTIMETEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(CONSTTIMETEST)
-
-test_verify_extra: $(VERIFYEXTRATEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(VERIFYEXTRATEST)
-
-test_clienthello: $(CLIENTHELLOTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(CLIENTHELLOTEST)
-
-test_packet: $(PACKETTEST)$(EXE_EXT)
-	@echo $(START) $@
-	../util/shlib_wrap.sh ./$(PACKETTEST)
-
-#OPENSSL_ia32cap=... in ssl tests below ensures AES-NI is switched off (AES-NI does not go through the testmode engine)
-test_sslvertol: ../apps/openssl$(EXE_EXT)
-	@echo $(START) $@
-	[ -z "$(SHARED_LIBS)" ] || OPENSSL_ENGINES=../engines ../util/shlib_wrap.sh $(PERL) -I../util -w ./$(SSLVERTOLTEST) "OPENSSL_ia32cap='~0x200000200000000' ../apps/openssl$(EXE_EXT)" ../apps/server.pem
-	@[ -n "$(SHARED_LIBS)" ] || echo test_sslvertol can only be performed with OpenSSL configured shared
-
-test_sslextension: ../apps/openssl$(EXE_EXT)
-	@echo $(START) $@
-	[ -z "$(SHARED_LIBS)" ] || OPENSSL_ENGINES=../engines ../util/shlib_wrap.sh $(PERL) -I../util -w ./$(SSLEXTENSIONTEST) "OPENSSL_ia32cap='~0x200000200000000' ../apps/openssl$(EXE_EXT)" ../apps/server.pem
-	@[ -n "$(SHARED_LIBS)" ] || echo test_sslextension can only be performed with OpenSSL configured shared
-
-test_sslsessionticket: ../apps/openssl$(EXE_EXT)
-	@echo $(START) $@
-	[ -z "$(SHARED_LIBS)" ] || PERL5LIB=$$PERL5LIB:../util OPENSSL_ENGINES=../engines ../util/shlib_wrap.sh ./$(SSLSESSIONTICKTEST) "OPENSSL_ia32cap='~0x200000200000000' ../apps/openssl$(EXE_EXT)" ../apps/server.pem
-	@[ -n "$(SHARED_LIBS)" ] || echo test_sslsessionticket can only be performed with OpenSSL configured shared
-
-test_sslskewith0p: ../apps/openssl$(EXE_EXT)
-	@echo $(START) $@
-	[ -z "$(SHARED_LIBS)" ] || OPENSSL_ENGINES=../engines ../util/shlib_wrap.sh $(PERL) -I../util -w ./$(SSLSKEWITH0PTEST) "OPENSSL_ia32cap='~0x200000200000000' ../apps/openssl$(EXE_EXT)" ../apps/server.pem
-	@[ -n "$(SHARED_LIBS)" ] || echo test_sslskewith0p can only be performed with OpenSSL configured shared
 
 update: local_depend
 	@if [ -z "$(THIS)" ]; then $(MAKE) -f $(TOP)/Makefile reflect THIS=$@; fi
@@ -457,7 +173,7 @@ dclean:
 	rm -f newkey.pem testkey.pem testreq.pem
 
 clean:
-	rm -f .rnd tmp.bntest tmp.bctest *.o *.obj *.dll lib tags core .pure .nfs* *.old *.bak fluff $(EXE) *.ss *.srl log dummytest
+	rm -f .rnd tmp.bntest tmp.bctest *.o *.obj *.dll lib tags core .pure .nfs* *.old *.bak fluff $(EXE) *.ss *.srl log *.log dummytest
 
 $(DLIBSSL):
 	(cd ..; $(MAKE) build_libssl)
@@ -484,6 +200,9 @@ BUILD_CMD_STATIC=shlib_target=; \
 $(RSATEST)$(EXE_EXT): $(RSATEST).o $(DLIBCRYPTO)
 	@target=$(RSATEST); $(BUILD_CMD)
 
+$(NPTEST)$(EXE_EXT): $(NPTEST).o $(DLIBCRYPTO)
+	@target=$(NPTEST); $(BUILD_CMD)
+
 $(BNTEST)$(EXE_EXT): $(BNTEST).o $(DLIBCRYPTO)
 	@target=$(BNTEST); $(BUILD_CMD)
 
@@ -495,6 +214,12 @@ $(EXPTEST)$(EXE_EXT): $(EXPTEST).o $(DLIBCRYPTO)
 
 $(IDEATEST)$(EXE_EXT): $(IDEATEST).o $(DLIBCRYPTO)
 	@target=$(IDEATEST); $(BUILD_CMD)
+
+$(GMDIFFTEST)$(EXE_EXT): $(GMDIFFTEST).o $(DLIBCRYPTO)
+	@target=$(GMDIFFTEST); $(BUILD_CMD)
+
+$(PBELUTEST)$(EXE_EXT): $(PBELUTEST).o $(DLIBCRYPTO)
+	@target=$(PBELUTEST); $(BUILD_CMD)
 
 $(MD2TEST)$(EXE_EXT): $(MD2TEST).o $(DLIBCRYPTO)
 	@target=$(MD2TEST); $(BUILD_CMD)
@@ -794,6 +519,11 @@ exptest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
 exptest.o: ../include/openssl/ossl_typ.h ../include/openssl/rand.h
 exptest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
 exptest.o: ../include/openssl/symhacks.h exptest.c
+gmdifftest.o: ../include/openssl/crypto.h ../include/openssl/e_os2.h
+gmdifftest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
+gmdifftest.o: ../include/openssl/ossl_typ.h ../include/openssl/safestack.h
+gmdifftest.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
+gmdifftest.o: gmdifftest.c
 gost2814789test.o: ../e_os.h ../engines/ccgost/gost89.h
 gost2814789test.o: ../include/openssl/asn1.h ../include/openssl/bio.h
 gost2814789test.o: ../include/openssl/buffer.h ../include/openssl/conf.h
@@ -870,6 +600,7 @@ mdc2test.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
 mdc2test.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
 mdc2test.o: ../include/openssl/safestack.h ../include/openssl/stack.h
 mdc2test.o: ../include/openssl/symhacks.h mdc2test.c
+nptest.o: nptest.c
 p5_crpt2_test.o: ../e_os.h ../include/openssl/asn1.h ../include/openssl/bio.h
 p5_crpt2_test.o: ../include/openssl/buffer.h ../include/openssl/conf.h
 p5_crpt2_test.o: ../include/openssl/crypto.h ../include/openssl/e_os2.h
@@ -889,6 +620,13 @@ packettest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
 packettest.o: ../include/openssl/ossl_typ.h ../include/openssl/safestack.h
 packettest.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
 packettest.o: ../ssl/packet_locl.h packettest.c
+pbelutest.o: ../include/openssl/asn1.h ../include/openssl/bio.h
+pbelutest.o: ../include/openssl/crypto.h ../include/openssl/e_os2.h
+pbelutest.o: ../include/openssl/evp.h ../include/openssl/obj_mac.h
+pbelutest.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
+pbelutest.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
+pbelutest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
+pbelutest.o: ../include/openssl/symhacks.h pbelutest.c
 randtest.o: ../e_os.h ../include/openssl/e_os2.h
 randtest.o: ../include/openssl/opensslconf.h ../include/openssl/ossl_typ.h
 randtest.o: ../include/openssl/rand.h randtest.c

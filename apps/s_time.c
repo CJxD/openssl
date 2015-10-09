@@ -73,10 +73,6 @@
 #include <openssl/pem.h>
 #include "s_apps.h"
 #include <openssl/err.h>
-#ifdef WIN32_STUFF
-# include "winmain.h"
-# include "wintext.h"
-#endif
 #if !defined(OPENSSL_SYS_MSDOS)
 # include OPENSSL_UNISTD
 #endif
@@ -113,8 +109,8 @@ static SSL *doConnection(SSL *scon, const char *host, SSL_CTX *ctx);
 typedef enum OPTION_choice {
     OPT_ERR = -1, OPT_EOF = 0, OPT_HELP,
     OPT_CONNECT, OPT_CIPHER, OPT_CERT, OPT_KEY, OPT_CAPATH,
-    OPT_CAFILE, OPT_NEW, OPT_REUSE, OPT_BUGS, OPT_VERIFY, OPT_TIME,
-    OPT_SSL3,
+    OPT_CAFILE, OPT_NOCAPATH, OPT_NOCAFILE, OPT_NEW, OPT_REUSE, OPT_BUGS,
+    OPT_VERIFY, OPT_TIME, OPT_SSL3,
     OPT_WWW
 } OPTION_CHOICE;
 
@@ -127,6 +123,10 @@ OPTIONS s_time_options[] = {
     {"key", OPT_KEY, '<', "File with key, PEM; default is -cert file"},
     {"CApath", OPT_CAPATH, '/', "PEM format directory of CA's"},
     {"cafile", OPT_CAFILE, '<', "PEM format file of CA's"},
+    {"no-CAfile", OPT_NOCAFILE, '-',
+     "Do not load the default certificates file"},
+    {"no-CApath", OPT_NOCAPATH, '-',
+     "Do not load certificates from the default certificates directory"},
     {"new", OPT_NEW, '-', "Just time new connections"},
     {"reuse", OPT_REUSE, '-', "Just time connection reuse"},
     {"bugs", OPT_BUGS, '-', "Turn on SSL bug compatibility"},
@@ -157,13 +157,11 @@ int s_time_main(int argc, char **argv)
     char *CApath = NULL, *CAfile = NULL, *cipher = NULL, *www_path = NULL;
     char *host = SSL_CONNECT_NAME, *certfile = NULL, *keyfile = NULL, *prog;
     double totalTime = 0.0;
+    int noCApath = 0, noCAfile = 0;
     int maxtime = SECONDS, nConn = 0, perform = 3, ret = 1, i, st_bugs =
         0, ver;
     long bytes_read = 0, finishtime = 0;
     OPTION_CHOICE o;
-#ifdef OPENSSL_SYS_WIN32
-    int exitNow = 0;            /* Set when it's time to exit main */
-#endif
 
     meth = TLS_client_method();
     verify_depth = 0;
@@ -207,6 +205,12 @@ int s_time_main(int argc, char **argv)
             break;
         case OPT_CAFILE:
             CAfile = opt_arg();
+            break;
+        case OPT_NOCAPATH:
+            noCApath = 1;
+            break;
+        case OPT_NOCAFILE:
+            noCAfile = 1;
             break;
         case OPT_CIPHER:
             cipher = opt_arg();
@@ -254,7 +258,7 @@ int s_time_main(int argc, char **argv)
     if (!set_cert_stuff(ctx, certfile, keyfile))
         goto end;
 
-    if (!ctx_set_verify_locations(ctx, CAfile, CApath)) {
+    if (!ctx_set_verify_locations(ctx, CAfile, CApath, noCAfile, noCApath)) {
         ERR_print_errors(bio_err);
         goto end;
     }
@@ -270,14 +274,6 @@ int s_time_main(int argc, char **argv)
     for (;;) {
         if (finishtime < (long)time(NULL))
             break;
-#ifdef WIN32_STUFF
-
-        if (flushWinMsgs(0) == -1)
-            goto end;
-
-        if (waitingToDie || exitNow) /* we're dead */
-            goto end;
-#endif
 
         if ((scon = doConnection(NULL, host, ctx)) == NULL)
             goto end;
@@ -366,14 +362,6 @@ int s_time_main(int argc, char **argv)
     for (;;) {
         if (finishtime < (long)time(NULL))
             break;
-
-#ifdef WIN32_STUFF
-        if (flushWinMsgs(0) == -1)
-            goto end;
-
-        if (waitingToDie || exitNow) /* we're dead */
-            goto end;
-#endif
 
         if ((doConnection(scon, host, ctx)) == NULL)
             goto end;

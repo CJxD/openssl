@@ -74,7 +74,7 @@ UI *UI_new(void)
 
 UI *UI_new_method(const UI_METHOD *method)
 {
-    UI *ret = OPENSSL_malloc(sizeof(*ret));
+    UI *ret = OPENSSL_zalloc(sizeof(*ret));
 
     if (ret == NULL) {
         UIerr(UI_F_UI_NEW_METHOD, ERR_R_MALLOC_FAILURE);
@@ -85,9 +85,6 @@ UI *UI_new_method(const UI_METHOD *method)
     else
         ret->meth = method;
 
-    ret->strings = NULL;
-    ret->user_data = NULL;
-    ret->flags = 0;
     CRYPTO_new_ex_data(CRYPTO_EX_INDEX_UI, ret, &ret->ex_data);
     return ret;
 }
@@ -582,12 +579,10 @@ const UI_METHOD *UI_set_method(UI *ui, const UI_METHOD *meth)
 
 UI_METHOD *UI_create_method(char *name)
 {
-    UI_METHOD *ui_method = OPENSSL_malloc(sizeof(*ui_method));
+    UI_METHOD *ui_method = OPENSSL_zalloc(sizeof(*ui_method));
 
-    if (ui_method) {
-        memset(ui_method, 0, sizeof(*ui_method));
+    if (ui_method)
         ui_method->name = BUF_strdup(name);
-    }
     return ui_method;
 }
 

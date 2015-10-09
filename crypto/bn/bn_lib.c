@@ -275,15 +275,11 @@ BIGNUM *BN_new(void)
 {
     BIGNUM *ret;
 
-    if ((ret = OPENSSL_malloc(sizeof(*ret))) == NULL) {
+    if ((ret = OPENSSL_zalloc(sizeof(*ret))) == NULL) {
         BNerr(BN_F_BN_NEW, ERR_R_MALLOC_FAILURE);
         return (NULL);
     }
     ret->flags = BN_FLG_MALLOCED;
-    ret->top = 0;
-    ret->neg = 0;
-    ret->dmax = 0;
-    ret->d = NULL;
     bn_check_top(ret);
     return (ret);
 }
@@ -553,7 +549,7 @@ BIGNUM *BN_bin2bn(const unsigned char *s, int len, BIGNUM *ret)
         return (NULL);
     bn_check_top(ret);
     /* Skip leading zero's. */
-    for ( ; *s == 0 && len > 0; s++, len--)
+    for ( ; len > 0 && *s == 0; s++, len--)
         continue;
     n = len;
     if (n == 0) {

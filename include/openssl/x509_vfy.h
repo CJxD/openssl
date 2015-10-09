@@ -407,6 +407,8 @@ void X509_STORE_CTX_set_depth(X509_STORE_CTX *ctx, int depth);
  * will force the behaviour to match that of previous versions.
  */
 # define X509_V_FLAG_NO_ALT_CHAINS               0x100000
+/* Do not check certificate/CRL validity against current time */
+# define X509_V_FLAG_NO_CHECK_TIME               0x200000
 
 # define X509_VP_FLAG_DEFAULT                    0x1
 # define X509_VP_FLAG_OVERWRITE                  0x2
@@ -459,7 +461,6 @@ void X509_STORE_CTX_cleanup(X509_STORE_CTX *ctx);
 X509_STORE *X509_STORE_CTX_get0_store(X509_STORE_CTX *ctx);
 
 X509_LOOKUP *X509_STORE_add_lookup(X509_STORE *v, X509_LOOKUP_METHOD *m);
-
 X509_LOOKUP_METHOD *X509_LOOKUP_hash_dir(void);
 X509_LOOKUP_METHOD *X509_LOOKUP_file(void);
 
@@ -472,11 +473,9 @@ int X509_STORE_get_by_subject(X509_STORE_CTX *vs, int type, X509_NAME *name,
 int X509_LOOKUP_ctrl(X509_LOOKUP *ctx, int cmd, const char *argc,
                      long argl, char **ret);
 
-# ifndef OPENSSL_NO_STDIO
 int X509_load_cert_file(X509_LOOKUP *ctx, const char *file, int type);
 int X509_load_crl_file(X509_LOOKUP *ctx, const char *file, int type);
 int X509_load_cert_crl_file(X509_LOOKUP *ctx, const char *file, int type);
-# endif
 
 X509_LOOKUP *X509_LOOKUP_new(X509_LOOKUP_METHOD *method);
 void X509_LOOKUP_free(X509_LOOKUP *ctx);
@@ -492,11 +491,9 @@ int X509_LOOKUP_by_alias(X509_LOOKUP *ctx, int type, char *str, int len,
                          X509_OBJECT *ret);
 int X509_LOOKUP_shutdown(X509_LOOKUP *ctx);
 
-# ifndef OPENSSL_NO_STDIO
 int X509_STORE_load_locations(X509_STORE *ctx,
                               const char *file, const char *dir);
 int X509_STORE_set_default_paths(X509_STORE *ctx);
-# endif
 
 int X509_STORE_CTX_get_ex_new_index(long argl, void *argp,
                                     CRYPTO_EX_new *new_func,

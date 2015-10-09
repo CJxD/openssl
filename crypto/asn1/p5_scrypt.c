@@ -65,6 +65,7 @@
 #include <openssl/x509.h>
 #include <openssl/rand.h>
 
+#ifndef OPENSSL_NO_SCRYPT
 /* PKCS#5 scrypt password based encryption structures */
 
 typedef struct {
@@ -81,7 +82,7 @@ ASN1_SEQUENCE(SCRYPT_PARAMS) = {
         ASN1_SIMPLE(SCRYPT_PARAMS, blockSize, ASN1_INTEGER),
         ASN1_SIMPLE(SCRYPT_PARAMS, parallelizationParameter, ASN1_INTEGER),
         ASN1_OPT(SCRYPT_PARAMS, keyLength, ASN1_INTEGER),
-} ASN1_SEQUENCE_END(SCRYPT_PARAMS)
+} static_ASN1_SEQUENCE_END(SCRYPT_PARAMS)
 
 DECLARE_ASN1_ALLOC_FUNCTIONS(SCRYPT_PARAMS)
 IMPLEMENT_ASN1_ALLOC_FUNCTIONS(SCRYPT_PARAMS)
@@ -330,3 +331,4 @@ int PKCS5_v2_scrypt_keyivgen(EVP_CIPHER_CTX *ctx, const char *pass,
     SCRYPT_PARAMS_free(sparam);
     return rv;
 }
+#endif /* OPENSSL_NO_SCRYPT */

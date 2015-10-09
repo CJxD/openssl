@@ -138,7 +138,8 @@ int enc_main(int argc, char **argv)
     char mbuf[sizeof magic - 1];
     OPTION_CHOICE o;
     int bsize = BSIZE, verbose = 0, debug = 0, olb64 = 0, nosalt = 0;
-    int enc = 1, printkey = 0, i, k, base64 = 0;
+    int enc = 1, printkey = 0, i, k;
+    int base64 = 0, informat = FORMAT_BINARY, outformat = FORMAT_BINARY;
     int ret = 1, inl, nopad = 0, non_fips_allow = 0;
     unsigned char key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH];
     unsigned char *buff = NULL, salt[PKCS5_SALT_LEN];
@@ -246,7 +247,7 @@ int enc_main(int argc, char **argv)
             str = opt_arg();
             break;
         case OPT_KFILE:
-            in = bio_open_default(opt_arg(), "r");
+            in = bio_open_default(opt_arg(), 'r', FORMAT_TEXT);
             if (in == NULL)
                 goto opthelp;
             i = BIO_gets(in, buf, sizeof buf);
@@ -316,6 +317,13 @@ int enc_main(int argc, char **argv)
     if (verbose)
         BIO_printf(bio_err, "bufsize=%d\n", bsize);
 
+    if (base64) {
+        if (enc)
+            outformat = FORMAT_BASE64;
+        else
+            informat = FORMAT_BASE64;
+    }
+
     strbuf = app_malloc(SIZE, "strbuf");
     buff = app_malloc(EVP_ENCODE_LENGTH(bsize), "evp buffer");
 
@@ -328,9 +336,9 @@ int enc_main(int argc, char **argv)
 
     if (infile == NULL) {
         unbuffer(stdin);
-        in = dup_bio_in();
+        in = dup_bio_in(informat);
     } else
-        in = bio_open_default(infile, "r");
+        in = bio_open_default(infile, 'r', informat);
     if (in == NULL)
         goto end;
 
@@ -366,7 +374,7 @@ int enc_main(int argc, char **argv)
         }
     }
 
-    out = bio_open_default(outfile, "w");
+    out = bio_open_default(outfile, 'w', outformat);
     if (out == NULL)
         goto end;
 
@@ -567,8 +575,8 @@ int enc_main(int argc, char **argv)
 
     ret = 0;
     if (verbose) {
-        BIO_printf(bio_err, "bytes read   :%8ld\n", BIO_number_read(in));
-        BIO_printf(bio_err, "bytes written:%8ld\n", BIO_number_written(out));
+        BIO_printf(bio_err, "bytes read   :%8"PRIu64"\n", BIO_number_read(in));
+        BIO_printf(bio_err, "bytes written:%8"PRIu64"\n", BIO_number_written(out));
     }
  end:
     ERR_print_errors(bio_err);

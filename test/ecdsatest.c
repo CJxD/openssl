@@ -107,8 +107,8 @@ int change_rand(void);
 int restore_rand(void);
 int fbytes(unsigned char *buf, int num);
 
-RAND_METHOD fake_rand;
-const RAND_METHOD *old_rand;
+static RAND_METHOD fake_rand;
+static const RAND_METHOD *old_rand;
 
 int change_rand(void)
 {
@@ -440,10 +440,8 @@ int test_builtin(BIO *out)
             goto builtin_err;
         }
         buf_len = 2 * bn_len;
-        if ((raw_buf = OPENSSL_malloc(buf_len)) == NULL)
+        if ((raw_buf = OPENSSL_zalloc(buf_len)) == NULL)
             goto builtin_err;
-        /* Pad the bignums with leading zeroes. */
-        memset(raw_buf, 0, buf_len);
         BN_bn2bin(ecdsa_sig->r, raw_buf + bn_len - r_len);
         BN_bn2bin(ecdsa_sig->s, raw_buf + buf_len - s_len);
 
@@ -512,7 +510,7 @@ int main(void)
     int ret = 1;
     BIO *out;
 
-    out = BIO_new_fp(stdout, BIO_NOCLOSE);
+    out = BIO_new_fp(stdout, BIO_NOCLOSE | BIO_FP_TEXT);
 
     /* enable memory leak checking unless explicitly disabled */
     if (!((getenv("OPENSSL_DEBUG_MEMORY") != NULL) &&

@@ -68,7 +68,10 @@
 #include <openssl/asn1t.h>
 #include <openssl/buffer.h>
 #include <openssl/x509v3.h>
+#include "internal/x509_int.h"
+#include "ext_dat.h"
 
+#ifndef OPENSSL_NO_RFC3779
 
 /*
  * OpenSSL ASN.1 template translation of RFC 3779 2.2.3.
@@ -97,7 +100,7 @@ ASN1_SEQUENCE(IPAddressFamily) = {
 ASN1_ITEM_TEMPLATE(IPAddrBlocks) =
   ASN1_EX_TEMPLATE_TYPE(ASN1_TFLG_SEQUENCE_OF, 0,
                         IPAddrBlocks, IPAddressFamily)
-ASN1_ITEM_TEMPLATE_END(IPAddrBlocks)
+static_ASN1_ITEM_TEMPLATE_END(IPAddrBlocks)
 
 IMPLEMENT_ASN1_FUNCTIONS(IPAddressRange)
 IMPLEMENT_ASN1_FUNCTIONS(IPAddressOrRange)
@@ -1339,3 +1342,5 @@ int v3_addr_validate_resource_set(STACK_OF(X509) *chain,
         return 0;
     return v3_addr_validate_path_internal(NULL, chain, ext);
 }
+
+#endif                          /* OPENSSL_NO_RFC3779 */

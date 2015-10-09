@@ -295,8 +295,7 @@ static const SSL_CIPHER cipher_aliases[] = {
      * "COMPLEMENTOFDEFAULT" (does *not* include ciphersuites not found in
      * ALL!)
      */
-    {0, SSL_TXT_CMPDEF, 0, SSL_kDHE | SSL_kECDHE, SSL_aNULL, ~SSL_eNULL, 0, 0,
-     0, 0, 0, 0},
+    {0, SSL_TXT_CMPDEF, 0, 0, 0, ~SSL_eNULL, 0, 0, SSL_NOT_DEFAULT, 0, 0, 0},
 
     /*
      * key exchange aliases (some of those using only a single bit here
@@ -966,6 +965,9 @@ static void ssl_cipher_apply_rule(unsigned long cipher_id,
             if ((algo_strength & SSL_STRONG_MASK)
                 && !(algo_strength & SSL_STRONG_MASK & cp->algo_strength))
                 continue;
+            if ((algo_strength & SSL_DEFAULT_MASK)
+                && !(algo_strength & SSL_DEFAULT_MASK & cp->algo_strength))
+                continue;
         }
 
 #ifdef CIPHER_DEBUG
@@ -1038,12 +1040,11 @@ static int ssl_cipher_strength_sort(CIPHER_ORDER **head_p,
         curr = curr->next;
     }
 
-    number_uses = OPENSSL_malloc(sizeof(int) * (max_strength_bits + 1));
+    number_uses = OPENSSL_zalloc(sizeof(int) * (max_strength_bits + 1));
     if (!number_uses) {
         SSLerr(SSL_F_SSL_CIPHER_STRENGTH_SORT, ERR_R_MALLOC_FAILURE);
         return (0);
     }
-    memset(number_uses, 0, sizeof(int) * (max_strength_bits + 1));
 
     /*
      * Now find the strength_bits values actually used
@@ -1252,6 +1253,20 @@ static int ssl_cipher_process_rulestr(const char *rule_str,
                         ca_list[j]->algo_strength & SSL_STRONG_MASK;
             }
 
+            if (ca_list[j]->algo_strength & SSL_DEFAULT_MASK) {
+                if (algo_strength & SSL_DEFAULT_MASK) {
+                    algo_strength &=
+                        (ca_list[j]->algo_strength & SSL_DEFAULT_MASK) |
+                        ~SSL_DEFAULT_MASK;
+                    if (!(algo_strength & SSL_DEFAULT_MASK)) {
+                        found = 0;
+                        break;
+                    }
+                } else
+                    algo_strength |=
+                        ca_list[j]->algo_strength & SSL_DEFAULT_MASK;
+            }
+
             if (ca_list[j]->valid) {
                 /*
                  * explicit ciphersuite found; its protocol version does not
@@ -1331,15 +1346,16 @@ static int check_suiteb_cipher_list(const SSL_METHOD *meth, CERT *c,
                                     const char **prule_str)
 {
     unsigned int suiteb_flags = 0, suiteb_comb2 = 0;
-    if (strcmp(*prule_str, "SUITEB128") == 0)
-        suiteb_flags = SSL_CERT_FLAG_SUITEB_128_LOS;
-    else if (strcmp(*prule_str, "SUITEB128ONLY") == 0)
+    if (strncmp(*prule_str, "SUITEB128ONLY", 13) == 0) {
         suiteb_flags = SSL_CERT_FLAG_SUITEB_128_LOS_ONLY;
-    else if (strcmp(*prule_str, "SUITEB128C2") == 0) {
+    } else if (strncmp(*prule_str, "SUITEB128C2", 11) == 0) {
         suiteb_comb2 = 1;
         suiteb_flags = SSL_CERT_FLAG_SUITEB_128_LOS;
-    } else if (strcmp(*prule_str, "SUITEB192") == 0)
+    } else if (strncmp(*prule_str, "SUITEB128", 9) == 0) {
+        suiteb_flags = SSL_CERT_FLAG_SUITEB_128_LOS;
+    } else if (strncmp(*prule_str, "SUITEB192", 9) == 0) {
         suiteb_flags = SSL_CERT_FLAG_SUITEB_192_LOS;
+    }
 
     if (suiteb_flags) {
         c->cert_flags &= ~SSL_CERT_FLAG_SUITEB_128_LOS;

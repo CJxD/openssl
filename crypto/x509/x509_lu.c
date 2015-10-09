@@ -60,6 +60,7 @@
 #include "internal/cryptlib.h"
 #include <openssl/lhash.h>
 #include <openssl/x509.h>
+#include "internal/x509_int.h"
 #include <openssl/x509v3.h>
 #include "x509_lcl.h"
 
@@ -67,15 +68,11 @@ X509_LOOKUP *X509_LOOKUP_new(X509_LOOKUP_METHOD *method)
 {
     X509_LOOKUP *ret;
 
-    ret = OPENSSL_malloc(sizeof(*ret));
+    ret = OPENSSL_zalloc(sizeof(*ret));
     if (ret == NULL)
         return NULL;
 
-    ret->init = 0;
-    ret->skip = 0;
     ret->method = method;
-    ret->method_data = NULL;
-    ret->store_ctx = NULL;
     if ((method->new_item != NULL) && !method->new_item(ret)) {
         OPENSSL_free(ret);
         return NULL;
@@ -184,26 +181,14 @@ X509_STORE *X509_STORE_new(void)
 {
     X509_STORE *ret;
 
-    if ((ret = OPENSSL_malloc(sizeof(*ret))) == NULL)
+    if ((ret = OPENSSL_zalloc(sizeof(*ret))) == NULL)
         return NULL;
     ret->objs = sk_X509_OBJECT_new(x509_object_cmp);
     ret->cache = 1;
     ret->get_cert_methods = sk_X509_LOOKUP_new_null();
-    ret->verify = 0;
-    ret->verify_cb = 0;
 
     if ((ret->param = X509_VERIFY_PARAM_new()) == NULL)
         return NULL;
-
-    ret->get_issuer = 0;
-    ret->check_issued = 0;
-    ret->check_revocation = 0;
-    ret->get_crl = 0;
-    ret->check_crl = 0;
-    ret->cert_crl = 0;
-    ret->lookup_certs = 0;
-    ret->lookup_crls = 0;
-    ret->cleanup = 0;
 
     if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509_STORE, ret, &ret->ex_data)) {
         sk_X509_OBJECT_free(ret->objs);
@@ -406,10 +391,10 @@ void X509_OBJECT_up_ref_count(X509_OBJECT *a)
     default:
         break;
     case X509_LU_X509:
-        CRYPTO_add(&a->data.x509->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(a->data.x509);
         break;
     case X509_LU_CRL:
-        CRYPTO_add(&a->data.crl->references, 1, CRYPTO_LOCK_X509_CRL);
+        X509_CRL_up_ref(a->data.crl);
         break;
     }
 }
@@ -435,22 +420,18 @@ static int x509_object_idx_cnt(STACK_OF(X509_OBJECT) *h, int type,
 {
     X509_OBJECT stmp;
     X509 x509_s;
-    X509_CINF cinf_s;
     X509_CRL crl_s;
-    X509_CRL_INFO crl_info_s;
     int idx;
 
     stmp.type = type;
     switch (type) {
     case X509_LU_X509:
         stmp.data.x509 = &x509_s;
-        x509_s.cert_info = &cinf_s;
-        cinf_s.subject = name;
+        x509_s.cert_info.subject = name;
         break;
     case X509_LU_CRL:
         stmp.data.crl = &crl_s;
-        crl_s.crl = &crl_info_s;
-        crl_info_s.issuer = name;
+        crl_s.crl.issuer = name;
         break;
     default:
         /* abort(); */
@@ -521,7 +502,7 @@ STACK_OF(X509) *X509_STORE_get1_certs(X509_STORE_CTX *ctx, X509_NAME *nm)
     for (i = 0; i < cnt; i++, idx++) {
         obj = sk_X509_OBJECT_value(ctx->ctx->objs, idx);
         x = obj->data.x509;
-        CRYPTO_add(&x->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(x);
         if (!sk_X509_push(sk, x)) {
             CRYPTO_w_unlock(CRYPTO_LOCK_X509_STORE);
             X509_free(x);
@@ -565,7 +546,7 @@ STACK_OF(X509_CRL) *X509_STORE_get1_crls(X509_STORE_CTX *ctx, X509_NAME *nm)
     for (i = 0; i < cnt; i++, idx++) {
         obj = sk_X509_OBJECT_value(ctx->ctx->objs, idx);
         x = obj->data.crl;
-        CRYPTO_add(&x->references, 1, CRYPTO_LOCK_X509_CRL);
+        X509_CRL_up_ref(x);
         if (!sk_X509_CRL_push(sk, x)) {
             CRYPTO_w_unlock(CRYPTO_LOCK_X509_STORE);
             X509_CRL_free(x);
@@ -676,7 +657,7 @@ int X509_STORE_CTX_get1_issuer(X509 **issuer, X509_STORE_CTX *ctx, X509 *x)
     }
     CRYPTO_w_unlock(CRYPTO_LOCK_X509_STORE);
     if (*issuer)
-        CRYPTO_add(&(*issuer)->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(*issuer);
     return ret;
 }
 

@@ -94,7 +94,7 @@ static int ossltest_digest_nids[] = {
 /* MD5 */
 static int digest_md5_init(EVP_MD_CTX *ctx);
 static int digest_md5_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count);
+                             size_t count);
 static int digest_md5_final(EVP_MD_CTX *ctx, unsigned char *md);
 
 static const EVP_MD digest_md5 = {
@@ -115,7 +115,7 @@ static const EVP_MD digest_md5 = {
 /* SHA1 */
 static int digest_sha1_init(EVP_MD_CTX *ctx);
 static int digest_sha1_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count);
+                              size_t count);
 static int digest_sha1_final(EVP_MD_CTX *ctx, unsigned char *md);
 
 static const EVP_MD digest_sha1 = {
@@ -136,7 +136,7 @@ static const EVP_MD digest_sha1 = {
 /* SHA256 */
 static int digest_sha256_init(EVP_MD_CTX *ctx);
 static int digest_sha256_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count);
+                                size_t count);
 static int digest_sha256_final(EVP_MD_CTX *ctx, unsigned char *md);
 
 static const EVP_MD digest_sha256 = {
@@ -158,7 +158,7 @@ static const EVP_MD digest_sha256 = {
 static int digest_sha384_init(EVP_MD_CTX *ctx);
 static int digest_sha512_init(EVP_MD_CTX *ctx);
 static int digest_sha512_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count);
+                                size_t count);
 static int digest_sha384_final(EVP_MD_CTX *ctx, unsigned char *md);
 static int digest_sha512_final(EVP_MD_CTX *ctx, unsigned char *md);
 
@@ -207,23 +207,6 @@ int ossltest_aes128_init_key(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 int ossltest_aes128_cbc_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                                const unsigned char *in, size_t inl);
 
-/*
- * Copy of the definition in crypto/evp/e_aes.c. Only used for the "sizeof"
- * below
- */
-typedef struct {
-    union {
-        double align;
-        AES_KEY ks;
-    } ks;
-    block128_f block;
-    union {
-        cbc128_f cbc;
-        ctr128_f ctr;
-    } stream;
-} EVP_AES_KEY;
-
-
 static const EVP_CIPHER ossltest_aes_128_cbc = { \
     NID_aes_128_cbc,
     16, /* block size */
@@ -233,7 +216,7 @@ static const EVP_CIPHER ossltest_aes_128_cbc = { \
     ossltest_aes128_init_key,
     ossltest_aes128_cbc_cipher,
     NULL,
-    sizeof(EVP_AES_KEY),
+    0, /* We don't know the size of cipher_data at compile time */
     NULL,NULL,NULL,NULL
 };
 
@@ -394,7 +377,7 @@ static int digest_md5_init(EVP_MD_CTX *ctx)
 }
 
 static int digest_md5_update(EVP_MD_CTX *ctx, const void *data,
-          unsigned long count)
+                             size_t count)
 {
     return MD5_Update(data(ctx), data, (size_t)count);
 }
@@ -421,7 +404,7 @@ static int digest_sha1_init(EVP_MD_CTX *ctx)
 }
 
 static int digest_sha1_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count)
+                              size_t count)
 {
     return SHA1_Update(data(ctx), data, (size_t)count);
 }
@@ -448,7 +431,7 @@ static int digest_sha256_init(EVP_MD_CTX *ctx)
 }
 
 static int digest_sha256_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count)
+                                size_t count)
 {
     return SHA256_Update(data(ctx), data, (size_t)count);
 }
@@ -480,7 +463,7 @@ static int digest_sha512_init(EVP_MD_CTX *ctx)
 }
 
 static int digest_sha512_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count)
+                                size_t count)
 {
     return SHA512_Update(data(ctx), data, (size_t)count);
 }
@@ -515,6 +498,19 @@ static int digest_sha512_final(EVP_MD_CTX *ctx, unsigned char *md)
 int ossltest_aes128_init_key(EVP_CIPHER_CTX *ctx, const unsigned char *key,
                              const unsigned char *iv, int enc)
 {
+    if (ctx->cipher_data == NULL) {
+        /*
+         * Normally cipher_data is allocated automatically for an engine but
+         * we don't know the ctx_size as compile time so we have to do it at
+         * run time
+         */
+        ctx->cipher_data = OPENSSL_zalloc(EVP_aes_128_cbc()->ctx_size);
+        if (!ctx->cipher_data) {
+            OSSLTESTerr(OSSLTEST_F_OSSLTEST_AES128_INIT_KEY,
+                        ERR_R_MALLOC_FAILURE);
+            return 0;
+        }
+    }
     return EVP_aes_128_cbc()->init(ctx, key, iv, enc);
 }
 

@@ -496,7 +496,7 @@ int x509_main(int argc, char **argv)
     if (!app_load_modules(NULL))
         goto end;
 
-    out = bio_open_default(outfile, "w");
+    out = bio_open_default(outfile, 'w', outformat);
     if (out == NULL)
         goto end;
 
@@ -556,7 +556,7 @@ int x509_main(int argc, char **argv)
             BIO_printf(bio_err, "We need a private key to sign with\n");
             goto end;
         }
-        in = bio_open_default(infile, "r");
+        in = bio_open_default(infile, 'r', informat);
         if (in == NULL)
             goto end;
         req = PEM_read_bio_X509_REQ(in, NULL, NULL, NULL);
@@ -567,15 +567,6 @@ int x509_main(int argc, char **argv)
             goto end;
         }
 
-        if ((req->req_info == NULL) ||
-            (req->req_info->pubkey == NULL) ||
-            (req->req_info->pubkey->public_key == NULL) ||
-            (req->req_info->pubkey->public_key->data == NULL)) {
-            BIO_printf(bio_err,
-                       "The certificate request appears to corrupted\n");
-            BIO_printf(bio_err, "It does not contain a public key\n");
-            goto end;
-        }
         if ((pkey = X509_REQ_get_pubkey(req)) == NULL) {
             BIO_printf(bio_err, "error unpacking public key\n");
             goto end;
@@ -611,9 +602,9 @@ int x509_main(int argc, char **argv)
         } else if (!X509_set_serialNumber(x, sno))
             goto end;
 
-        if (!X509_set_issuer_name(x, req->req_info->subject))
+        if (!X509_set_issuer_name(x, X509_REQ_get_subject_name(req)))
             goto end;
-        if (!X509_set_subject_name(x, req->req_info->subject))
+        if (!X509_set_subject_name(x, X509_REQ_get_subject_name(req)))
             goto end;
 
         X509_gmtime_adj(X509_get_notBefore(x), 0);
@@ -903,8 +894,13 @@ int x509_main(int argc, char **argv)
         goto end;
     }
 
-    if (badsig)
-        x->signature->data[x->signature->length - 1] ^= 0x1;
+    if (badsig) {
+        ASN1_BIT_STRING *signature;
+        unsigned char *s;
+        X509_get0_signature(&signature, NULL, x);
+        s = ASN1_STRING_data(signature);
+        s[ASN1_STRING_length(signature) - 1] ^= 0x1;
+    }
 
     if (outformat == FORMAT_ASN1)
         i = i2d_X509_bio(out, x);

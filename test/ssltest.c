@@ -204,20 +204,6 @@
 # include OPENSSL_UNISTD
 #endif
 
-#ifdef OPENSSL_SYS_VMS
-# define TEST_SERVER_CERT "SYS$DISK:[-.APPS]SERVER.PEM"
-# define TEST_CLIENT_CERT "SYS$DISK:[-.APPS]CLIENT.PEM"
-#elif defined(OPENSSL_SYS_WINCE)
-# define TEST_SERVER_CERT "\\OpenSSL\\server.pem"
-# define TEST_CLIENT_CERT "\\OpenSSL\\client.pem"
-#elif defined(OPENSSL_SYS_NETWARE)
-# define TEST_SERVER_CERT "\\openssl\\apps\\server.pem"
-# define TEST_CLIENT_CERT "\\openssl\\apps\\client.pem"
-#else
-# define TEST_SERVER_CERT "../apps/server.pem"
-# define TEST_CLIENT_CERT "../apps/client.pem"
-#endif
-
 /*
  * There is really no standard for this, so let's assign something
  * only for this test
@@ -302,9 +288,9 @@ static BIO *bio_stdout = NULL;
 #ifndef OPENSSL_NO_NEXTPROTONEG
 /* Note that this code assumes that this is only a one element list: */
 static const char NEXT_PROTO_STRING[] = "\x09testproto";
-int npn_client = 0;
-int npn_server = 0;
-int npn_server_reject = 0;
+static int npn_client = 0;
+static int npn_server = 0;
+static int npn_server_reject = 0;
 
 static int cb_client_npn(SSL *s, unsigned char **out, unsigned char *outlen,
                          const unsigned char *in, unsigned int inlen,
@@ -514,24 +500,24 @@ static int verify_alpn(SSL *client, SSL *server)
 #define CUSTOM_EXT_TYPE_2 1002
 #define CUSTOM_EXT_TYPE_3 1003
 
-const char custom_ext_cli_string[] = "abc";
-const char custom_ext_srv_string[] = "defg";
+static const char custom_ext_cli_string[] = "abc";
+static const char custom_ext_srv_string[] = "defg";
 
 /* These set from cmdline */
-char *serverinfo_file = NULL;
-int serverinfo_sct = 0;
-int serverinfo_tack = 0;
+static char *serverinfo_file = NULL;
+static int serverinfo_sct = 0;
+static int serverinfo_tack = 0;
 
 /* These set based on extension callbacks */
-int serverinfo_sct_seen = 0;
-int serverinfo_tack_seen = 0;
-int serverinfo_other_seen = 0;
+static int serverinfo_sct_seen = 0;
+static int serverinfo_tack_seen = 0;
+static int serverinfo_other_seen = 0;
 
 /* This set from cmdline */
-int custom_ext = 0;
+static int custom_ext = 0;
 
 /* This set based on extension callbacks */
-int custom_ext_error = 0;
+static int custom_ext_error = 0;
 
 static int serverinfo_cli_parse_cb(SSL *s, unsigned int ext_type,
                                    const unsigned char *in, size_t inlen,
@@ -965,10 +951,6 @@ int main(int argc, char *argv[])
     int server_auth = 0, i;
     struct app_verify_arg app_verify_arg =
         { APP_CALLBACK_STRING, 0, 0, NULL, NULL };
-    char *server_cert = TEST_SERVER_CERT;
-    char *server_key = NULL;
-    char *client_cert = TEST_CLIENT_CERT;
-    char *client_key = NULL;
 #ifndef OPENSSL_NO_EC
     char *named_curve = NULL;
 #endif
@@ -1043,14 +1025,18 @@ int main(int argc, char *argv[])
     }
 
     SSL_CONF_CTX_set_flags(s_cctx,
-                           SSL_CONF_FLAG_CMDLINE | SSL_CONF_FLAG_SERVER);
+                           SSL_CONF_FLAG_CMDLINE | SSL_CONF_FLAG_SERVER |
+                           SSL_CONF_FLAG_CERTIFICATE |
+                           SSL_CONF_FLAG_REQUIRE_PRIVATE);
     if (!SSL_CONF_CTX_set1_prefix(s_cctx, "-s_")) {
         ERR_print_errors(bio_err);
         goto end;
     }
 
     SSL_CONF_CTX_set_flags(c_cctx,
-                           SSL_CONF_FLAG_CMDLINE | SSL_CONF_FLAG_CLIENT);
+                           SSL_CONF_FLAG_CMDLINE | SSL_CONF_FLAG_CLIENT |
+                           SSL_CONF_FLAG_CERTIFICATE |
+                           SSL_CONF_FLAG_REQUIRE_PRIVATE);
     if (!SSL_CONF_CTX_set1_prefix(c_cctx, "-c_")) {
         ERR_print_errors(bio_err);
         goto end;
@@ -1165,30 +1151,6 @@ int main(int argc, char *argv[])
                 bytes *= 1024L;
             if (argv[0][i - 1] == 'm')
                 bytes *= 1024L * 1024L;
-        } else if (strcmp(*argv, "-cert") == 0) {
-            if (--argc < 1)
-                goto bad;
-            server_cert = *(++argv);
-        } else if (strcmp(*argv, "-s_cert") == 0) {
-            if (--argc < 1)
-                goto bad;
-            server_cert = *(++argv);
-        } else if (strcmp(*argv, "-key") == 0) {
-            if (--argc < 1)
-                goto bad;
-            server_key = *(++argv);
-        } else if (strcmp(*argv, "-s_key") == 0) {
-            if (--argc < 1)
-                goto bad;
-            server_key = *(++argv);
-        } else if (strcmp(*argv, "-c_cert") == 0) {
-            if (--argc < 1)
-                goto bad;
-            client_cert = *(++argv);
-        } else if (strcmp(*argv, "-c_key") == 0) {
-            if (--argc < 1)
-                goto bad;
-            client_key = *(++argv);
         } else if (strcmp(*argv, "-cipher") == 0) {
             if (--argc < 1)
                 goto bad;
@@ -1348,7 +1310,7 @@ int main(int argc, char *argv[])
     if (fips_mode) {
         if (!FIPS_mode_set(1)) {
             ERR_load_crypto_strings();
-            ERR_print_errors(BIO_new_fp(stderr, BIO_NOCLOSE));
+            ERR_print_errors(bio_err);
             EXIT(1);
         } else
             fprintf(stderr, "*** IN FIPS MODE ***\n");
@@ -1518,26 +1480,6 @@ int main(int argc, char *argv[])
 #ifndef OPENSSL_NO_RSA
     SSL_CTX_set_tmp_rsa_callback(s_ctx, tmp_rsa_cb);
 #endif
-
-    if (!SSL_CTX_use_certificate_file(s_ctx, server_cert, SSL_FILETYPE_PEM)) {
-        ERR_print_errors(bio_err);
-    } else if (!SSL_CTX_use_PrivateKey_file(s_ctx,
-                                            (server_key ? server_key :
-                                             server_cert),
-                                            SSL_FILETYPE_PEM)) {
-        ERR_print_errors(bio_err);
-        goto end;
-    }
-
-    if (client_auth) {
-        if (!SSL_CTX_use_certificate_file(c_ctx, client_cert, SSL_FILETYPE_PEM)
-           || !SSL_CTX_use_PrivateKey_file(c_ctx,
-                                    (client_key ? client_key : client_cert),
-                                    SSL_FILETYPE_PEM)) {
-            ERR_print_errors(bio_err);
-            goto end;
-        }
-    }
 
     if ((!SSL_CTX_load_verify_locations(s_ctx, CAfile, CApath)) ||
         (!SSL_CTX_set_default_verify_paths(s_ctx)) ||
@@ -2174,13 +2116,10 @@ int doit(SSL *s_ssl, SSL *c_ssl, long count)
 
     bufsiz = count > 40 * 1024 ? 40 * 1024 : count;
 
-    if ((cbuf = OPENSSL_malloc(bufsiz)) == NULL)
+    if ((cbuf = OPENSSL_zalloc(bufsiz)) == NULL)
         goto err;
-    if ((sbuf = OPENSSL_malloc(bufsiz)) == NULL)
+    if ((sbuf = OPENSSL_zalloc(bufsiz)) == NULL)
         goto err;
-
-    memset(cbuf, 0, bufsiz);
-    memset(sbuf, 0, bufsiz);
 
     c_to_s = BIO_new(BIO_s_mem());
     s_to_c = BIO_new(BIO_s_mem());
@@ -2483,7 +2422,7 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
 
     if (ok == 1) {
         X509 *xs = ctx->current_cert;
-        if (xs->ex_flags & EXFLAG_PROXY) {
+        if (X509_get_extension_flags(xs) & EXFLAG_PROXY) {
             unsigned int *letters = X509_STORE_CTX_get_ex_data(ctx,
                                                                get_proxy_auth_ex_data_idx
                                                                ());

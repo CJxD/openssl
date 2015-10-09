@@ -193,35 +193,17 @@ SSL_SESSION *SSL_SESSION_new(void)
 {
     SSL_SESSION *ss;
 
-    ss = OPENSSL_malloc(sizeof(*ss));
+    ss = OPENSSL_zalloc(sizeof(*ss));
     if (ss == NULL) {
         SSLerr(SSL_F_SSL_SESSION_NEW, ERR_R_MALLOC_FAILURE);
-        return (0);
+        return (NULL);
     }
-    memset(ss, 0, sizeof(*ss));
 
     ss->verify_result = 1;      /* avoid 0 (= X509_V_OK) just in case */
     ss->references = 1;
     ss->timeout = 60 * 5 + 4;   /* 5 minute timeout by default */
     ss->time = (unsigned long)time(NULL);
-    ss->prev = NULL;
-    ss->next = NULL;
-    ss->compress_meth = 0;
-    ss->tlsext_hostname = NULL;
-#ifndef OPENSSL_NO_EC
-    ss->tlsext_ecpointformatlist_length = 0;
-    ss->tlsext_ecpointformatlist = NULL;
-    ss->tlsext_ellipticcurvelist_length = 0;
-    ss->tlsext_ellipticcurvelist = NULL;
-#endif
     CRYPTO_new_ex_data(CRYPTO_EX_INDEX_SSL_SESSION, ss, &ss->ex_data);
-#ifndef OPENSSL_NO_PSK
-    ss->psk_identity_hint = NULL;
-    ss->psk_identity = NULL;
-#endif
-#ifndef OPENSSL_NO_SRP
-    ss->srp_username = NULL;
-#endif
     return (ss);
 }
 
@@ -266,7 +248,7 @@ SSL_SESSION *ssl_session_dup(SSL_SESSION *src, int ticket)
     dest->references = 1;
 
     if (src->peer != NULL)
-        CRYPTO_add(&src->peer->references, 1, CRYPTO_LOCK_X509);
+        X509_up_ref(src->peer);
 
     if (src->peer_chain != NULL) {
         dest->peer_chain = X509_chain_up_ref(src->peer_chain);
@@ -531,11 +513,8 @@ int ssl_get_new_session(SSL *s, int session)
  * ssl_get_prev attempts to find an SSL_SESSION to be used to resume this
  * connection. It is only called by servers.
  *
- *   session_id: points at the session ID in the ClientHello. This code will
- *       read past the end of this in order to parse out the session ticket
- *       extension, if any.
- *   len: the length of the session ID.
- *   limit: a pointer to the first byte after the ClientHello.
+ *   ext: ClientHello extensions (including length prefix)
+ *   session_id: ClientHello session ID.
  *
  * Returns:
  *   -1: error
@@ -547,8 +526,7 @@ int ssl_get_new_session(SSL *s, int session)
  *   - Both for new and resumed sessions, s->tlsext_ticket_expected is set to 1
  *     if the server should issue a new session ticket (to 0 otherwise).
  */
-int ssl_get_prev_session(SSL *s, PACKET *pkt, unsigned char *session_id,
-                         int len)
+int ssl_get_prev_session(SSL *s, const PACKET *ext, const PACKET *session_id)
 {
     /* This is used only by servers. */
 
@@ -556,15 +534,16 @@ int ssl_get_prev_session(SSL *s, PACKET *pkt, unsigned char *session_id,
     int fatal = 0;
     int try_session_cache = 1;
     int r;
+    size_t len = PACKET_remaining(session_id);
 
-    if (len < 0 || len > SSL_MAX_SSL_SESSION_ID_LENGTH)
+    if (len > SSL_MAX_SSL_SESSION_ID_LENGTH)
         goto err;
 
     if (len == 0)
         try_session_cache = 0;
 
     /* sets s->tlsext_ticket_expected */
-    r = tls1_process_ticket(s, pkt, session_id, len, &ret);
+    r = tls1_process_ticket(s, ext, session_id, &ret);
     switch (r) {
     case -1:                   /* Error during processing */
         fatal = 1;
@@ -585,11 +564,14 @@ int ssl_get_prev_session(SSL *s, PACKET *pkt, unsigned char *session_id,
         !(s->session_ctx->session_cache_mode &
           SSL_SESS_CACHE_NO_INTERNAL_LOOKUP)) {
         SSL_SESSION data;
+        size_t local_len;
         data.ssl_version = s->version;
-        data.session_id_length = len;
-        if (len == 0)
-            return 0;
-        memcpy(data.session_id, session_id, len);
+        if (!PACKET_copy_all(session_id, data.session_id,
+                             sizeof(data.session_id),
+                             &local_len)) {
+            goto err;
+        }
+        data.session_id_length = local_len;
         CRYPTO_r_lock(CRYPTO_LOCK_SSL_CTX);
         ret = lh_SSL_SESSION_retrieve(s->session_ctx->sessions, &data);
         if (ret != NULL) {
@@ -604,8 +586,15 @@ int ssl_get_prev_session(SSL *s, PACKET *pkt, unsigned char *session_id,
     if (try_session_cache &&
         ret == NULL && s->session_ctx->get_session_cb != NULL) {
         int copy = 1;
+        /* The user callback takes a non-const pointer, so grab a local copy. */
+        unsigned char *sid = NULL;
+        size_t sid_len;
+        if (!PACKET_memdup(session_id, &sid, &sid_len))
+            goto err;
+        ret = s->session_ctx->get_session_cb(s, sid, sid_len, &copy);
+        OPENSSL_free(sid);
 
-        if ((ret = s->session_ctx->get_session_cb(s, session_id, len, &copy))) {
+        if (ret != NULL) {
             s->session_ctx->stats.sess_cb_hit++;
 
             /*
@@ -1228,7 +1217,7 @@ void SSL_CTX_set_cookie_generate_cb(SSL_CTX *ctx,
 }
 
 void SSL_CTX_set_cookie_verify_cb(SSL_CTX *ctx,
-                                  int (*cb) (SSL *ssl, unsigned char *cookie,
+                                  int (*cb) (SSL *ssl, const unsigned char *cookie,
                                              unsigned int cookie_len))
 {
     ctx->app_verify_cookie_cb = cb;

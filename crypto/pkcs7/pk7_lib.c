@@ -308,7 +308,7 @@ int PKCS7_add_certificate(PKCS7 *p7, X509 *x509)
         PKCS7err(PKCS7_F_PKCS7_ADD_CERTIFICATE, ERR_R_MALLOC_FAILURE);
         return 0;
     }
-    CRYPTO_add(&x509->references, 1, CRYPTO_LOCK_X509);
+    X509_up_ref(x509);
     if (!sk_X509_push(*sk, x509)) {
         X509_free(x509);
         return 0;
@@ -341,7 +341,7 @@ int PKCS7_add_crl(PKCS7 *p7, X509_CRL *crl)
         return 0;
     }
 
-    CRYPTO_add(&crl->references, 1, CRYPTO_LOCK_X509_CRL);
+    X509_CRL_up_ref(crl);
     if (!sk_X509_CRL_push(*sk, crl)) {
         X509_CRL_free(crl);
         return 0;
@@ -545,7 +545,7 @@ int PKCS7_RECIP_INFO_set(PKCS7_RECIP_INFO *p7i, X509 *x509)
 
     EVP_PKEY_free(pkey);
 
-    CRYPTO_add(&x509->references, 1, CRYPTO_LOCK_X509);
+    X509_up_ref(x509);
     p7i->cert = x509;
 
     return 1;

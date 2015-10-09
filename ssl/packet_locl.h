@@ -62,6 +62,7 @@
 # include <string.h>
 # include <openssl/bn.h>
 # include <openssl/buffer.h>
+# include <openssl/crypto.h>
 # include "e_os.h"
 
 # ifdef __cplusplus
@@ -69,22 +70,25 @@ extern "C" {
 # endif
 
 typedef struct {
-    /* Pointer to the start of the buffer data */
-    unsigned char *start;
-
-    /* Pointer to the first byte after the end of the buffer data */
-    unsigned char *end;
-
     /* Pointer to where we are currently reading from */
     unsigned char *curr;
+    /* Number of bytes remaining */
+    size_t remaining;
 } PACKET;
+
+/* Internal unchecked shorthand; don't use outside this file. */
+static inline void packet_forward(PACKET *pkt, size_t len)
+{
+    pkt->curr += len;
+    pkt->remaining -= len;
+}
 
 /*
  * Returns the number of bytes remaining to be read in the PACKET
  */
 __owur static inline size_t PACKET_remaining(const PACKET *pkt)
 {
-    return (size_t)(pkt->end - pkt->curr);
+    return pkt->remaining;
 }
 
 /*
@@ -105,18 +109,32 @@ static inline unsigned char *PACKET_data(const PACKET *pkt)
  */
 static inline int PACKET_buf_init(PACKET *pkt, unsigned char *buf, size_t len)
 {
-    pkt->start = pkt->curr = buf;
-    pkt->end = pkt->start + len;
-
-    /* Sanity checks */
-    if (pkt->start > pkt->end
-            || pkt->curr < pkt->start
-            || pkt->curr > pkt->end
-            || len != (size_t)(pkt->end - pkt->start)) {
+    /* Sanity check for negative values. */
+    if (buf + len < buf)
         return 0;
-    }
 
+    pkt->curr = buf;
+    pkt->remaining = len;
     return 1;
+}
+
+/* Initialize a PACKET to hold zero bytes. */
+static inline void PACKET_null_init(PACKET *pkt)
+{
+    pkt->curr = NULL;
+    pkt->remaining = 0;
+}
+
+/*
+ * Returns 1 if the packet has length |num| and its contents equal the |num|
+ * bytes read from |ptr|. Returns 0 otherwise (lengths or contents not equal).
+ * If lengths are equal, performs the comparison in constant time.
+ */
+__owur static inline int PACKET_equal(const PACKET *pkt, const void *ptr,
+                                      size_t num) {
+    if (PACKET_remaining(pkt) != num)
+        return 0;
+    return CRYPTO_memcmp(pkt->curr, ptr, num) == 0;
 }
 
 /*
@@ -146,7 +164,7 @@ __owur static inline int PACKET_get_sub_packet(PACKET *pkt, PACKET *subpkt,
     if (!PACKET_peek_sub_packet(pkt, subpkt, len))
         return 0;
 
-    pkt->curr += len;
+    packet_forward(pkt, len);
 
     return 1;
 }
@@ -173,7 +191,7 @@ __owur static inline int PACKET_get_net_2(PACKET *pkt, unsigned int *data)
     if (!PACKET_peek_net_2(pkt, data))
         return 0;
 
-    pkt->curr += 2;
+    packet_forward(pkt, 2);
 
     return 1;
 }
@@ -201,7 +219,7 @@ __owur static inline int PACKET_get_net_3(PACKET *pkt, unsigned long *data)
     if (!PACKET_peek_net_3(pkt, data))
         return 0;
 
-    pkt->curr += 3;
+    packet_forward(pkt, 3);
 
     return 1;
 }
@@ -230,7 +248,7 @@ __owur static inline int PACKET_get_net_4(PACKET *pkt, unsigned long *data)
     if (!PACKET_peek_net_4(pkt, data))
         return 0;
 
-    pkt->curr += 4;
+    packet_forward(pkt, 4);
 
     return 1;
 }
@@ -252,7 +270,7 @@ __owur static inline int PACKET_get_1(PACKET *pkt, unsigned int *data)
     if (!PACKET_peek_1(pkt, data))
         return 0;
 
-    pkt->curr++;
+    packet_forward(pkt, 1);
 
     return 1;
 }
@@ -284,7 +302,7 @@ __owur static inline int PACKET_get_4(PACKET *pkt, unsigned long *data)
     if (!PACKET_peek_4(pkt, data))
         return 0;
 
-    pkt->curr += 4;
+    packet_forward(pkt, 4);
 
     return 1;
 }
@@ -296,7 +314,7 @@ __owur static inline int PACKET_get_4(PACKET *pkt, unsigned long *data)
  * underlying buffer gets freed
  */
 __owur static inline int PACKET_peek_bytes(const PACKET *pkt, unsigned char **data,
-                                          size_t len)
+                                           size_t len)
 {
     if (PACKET_remaining(pkt) < len)
         return 0;
@@ -318,7 +336,7 @@ __owur static inline int PACKET_get_bytes(PACKET *pkt, unsigned char **data,
     if (!PACKET_peek_bytes(pkt, data, len))
         return 0;
 
-    pkt->curr += len;
+    packet_forward(pkt, len);
 
     return 1;
 }
@@ -335,27 +353,88 @@ __owur static inline int PACKET_peek_copy_bytes(const PACKET *pkt,
     return 1;
 }
 
-/* Read |len| bytes from |pkt| and copy them to |data| */
+/*
+ * Read |len| bytes from |pkt| and copy them to |data|.
+ * The caller is responsible for ensuring that |data| can hold |len| bytes.
+ */
 __owur static inline int PACKET_copy_bytes(PACKET *pkt, unsigned char *data,
-                                          size_t len)
+                                           size_t len)
 {
     if (!PACKET_peek_copy_bytes(pkt, data, len))
         return 0;
 
-    pkt->curr += len;
+    packet_forward(pkt, len);
 
     return 1;
 }
 
-/* Move the current reading position back |len| bytes */
-__owur static inline int PACKET_back(PACKET *pkt, size_t len)
+/*
+ * Copy packet data to |dest|, and set |len| to the number of copied bytes.
+ * If the packet has more than |dest_len| bytes, nothing is copied.
+ * Returns 1 if the packet data fits in |dest_len| bytes, 0 otherwise.
+ * Does not forward PACKET position (because it is typically the last thing
+ * done with a given PACKET).
+ */
+__owur static inline int PACKET_copy_all(const PACKET *pkt, unsigned char *dest,
+                                         size_t dest_len, size_t *len) {
+    if (PACKET_remaining(pkt) > dest_len) {
+        *len = 0;
+        return 0;
+    }
+    *len = pkt->remaining;
+    memcpy(dest, pkt->curr, pkt->remaining);
+    return 1;
+}
+
+/*
+ * Copy |pkt| bytes to a newly allocated buffer and store a pointer to the
+ * result in |*data|, and the length in |len|.
+ * If |*data| is not NULL, the old data is OPENSSL_free'd.
+ * If the packet is empty, or malloc fails, |*data| will be set to NULL.
+ * Returns 1 if the malloc succeeds and 0 otherwise.
+ * Does not forward PACKET position (because it is typically the last thing
+ * done with a given PACKET).
+ */
+__owur static inline int PACKET_memdup(const PACKET *pkt, unsigned char **data,
+                                       size_t *len)
 {
-    if (len > (size_t)(pkt->curr - pkt->start))
+    size_t length;
+
+    OPENSSL_free(*data);
+    *data = NULL;
+    *len = 0;
+
+    length = PACKET_remaining(pkt);
+
+    if (length == 0)
+        return 1;
+
+    *data = BUF_memdup(pkt->curr, length);
+
+    if (*data == NULL)
         return 0;
 
-    pkt->curr -= len;
-
+    *len = length;
     return 1;
+}
+
+/*
+ * Read a C string from |pkt| and copy to a newly allocated, NUL-terminated
+ * buffer. Store a pointer to the result in |*data|.
+ * If |*data| is not NULL, the old data is OPENSSL_free'd.
+ * If the data in |pkt| does not contain a NUL-byte, the entire data is
+ * copied and NUL-terminated.
+ * Returns 1 if the malloc succeeds and 0 otherwise.
+ * Does not forward PACKET position (because it is typically the last thing done
+ * with a given PACKET).
+ */
+__owur static inline int PACKET_strndup(const PACKET *pkt, char **data)
+{
+    OPENSSL_free(*data);
+
+    /* This will succeed on an empty packet, unless pkt->curr == NULL. */
+    *data = BUF_strndup((const char*)pkt->curr, PACKET_remaining(pkt));
+    return (*data != NULL);
 }
 
 /* Move the current reading position forward |len| bytes */
@@ -364,37 +443,7 @@ __owur static inline int PACKET_forward(PACKET *pkt, size_t len)
     if (PACKET_remaining(pkt) < len)
         return 0;
 
-    pkt->curr += len;
-
-    return 1;
-}
-
-/* Store a bookmark for the current reading position in |*bm| */
-__owur static inline int PACKET_get_bookmark(const PACKET *pkt, size_t *bm)
-{
-    *bm = pkt->curr - pkt->start;
-
-    return 1;
-}
-
-/* Set the current reading position to the bookmark |bm| */
-__owur static inline int PACKET_goto_bookmark(PACKET *pkt, size_t bm)
-{
-    if (bm > (size_t)(pkt->end - pkt->start))
-        return 0;
-
-    pkt->curr = pkt->start + bm;
-
-    return 1;
-}
-
-/*
- * Stores the total length of the packet we have in the underlying buffer in
- * |*len|
- */
-__owur static inline int PACKET_length(const PACKET *pkt, size_t *len)
-{
-    *len = pkt->end - pkt->start;
+    packet_forward(pkt, len);
 
     return 1;
 }
@@ -417,8 +466,8 @@ __owur static inline int PACKET_get_length_prefixed_1(PACKET *pkt, PACKET *subpk
   }
 
   *pkt = tmp;
-  subpkt->start = subpkt->curr = data;
-  subpkt->end = subpkt->start + length;
+  subpkt->curr = data;
+  subpkt->remaining = length;
 
   return 1;
 }
@@ -441,8 +490,8 @@ __owur static inline int PACKET_get_length_prefixed_2(PACKET *pkt, PACKET *subpk
   }
 
   *pkt = tmp;
-  subpkt->start = subpkt->curr = data;
-  subpkt->end = subpkt->start + length;
+  subpkt->curr = data;
+  subpkt->remaining = length;
 
   return 1;
 }
@@ -465,8 +514,8 @@ __owur static inline int PACKET_get_length_prefixed_3(PACKET *pkt, PACKET *subpk
   }
 
   *pkt = tmp;
-  subpkt->start = subpkt->curr = data;
-  subpkt->end = subpkt->start + length;
+  subpkt->curr = data;
+  subpkt->remaining = length;
 
   return 1;
 }

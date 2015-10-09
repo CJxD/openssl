@@ -169,6 +169,7 @@ typedef struct bio_dgram_data_st {
     unsigned int mtu;
     struct timeval next_timeout;
     struct timeval socket_timeout;
+    unsigned int peekmode;
 } bio_dgram_data;
 
 # ifndef OPENSSL_NO_SCTP
@@ -221,17 +222,11 @@ BIO *BIO_new_dgram(int fd, int close_flag)
 
 static int dgram_new(BIO *bi)
 {
-    bio_dgram_data *data = NULL;
+    bio_dgram_data *data = OPENSSL_zalloc(sizeof(*data));
 
-    bi->init = 0;
-    bi->num = 0;
-    data = OPENSSL_malloc(sizeof(*data));
     if (data == NULL)
         return 0;
-    memset(data, 0, sizeof(*data));
     bi->ptr = data;
-
-    bi->flags = 0;
     return (1);
 }
 
@@ -373,6 +368,7 @@ static int dgram_read(BIO *b, char *out, int outl)
 {
     int ret = 0;
     bio_dgram_data *data = (bio_dgram_data *)b->ptr;
+    int flags = 0;
 
     struct {
         /*
@@ -398,7 +394,9 @@ static int dgram_read(BIO *b, char *out, int outl)
         clear_socket_error();
         memset(&sa.peer, 0, sizeof(sa.peer));
         dgram_adjust_rcv_timeout(b);
-        ret = recvfrom(b->num, out, outl, 0, &sa.peer.sa, (void *)&sa.len);
+        if (data->peekmode)
+            flags = MSG_PEEK;
+        ret = recvfrom(b->num, out, outl, flags, &sa.peer.sa, (void *)&sa.len);
         if (sizeof(sa.len.i) != sizeof(sa.len.s) && sa.len.i == 0) {
             OPENSSL_assert(sa.len.s <= sizeof(sa.peer));
             sa.len.i = (int)sa.len.s;
@@ -929,6 +927,9 @@ static long dgram_ctrl(BIO *b, int cmd, long num, void *ptr)
     case BIO_CTRL_DGRAM_GET_MTU_OVERHEAD:
         ret = dgram_get_mtu_overhead(data);
         break;
+    case BIO_CTRL_DGRAM_SET_PEEK_MODE:
+        data->peekmode = (unsigned int)num;
+        break;
     default:
         ret = 0;
         break;
@@ -997,16 +998,13 @@ BIO *BIO_new_dgram_sctp(int fd, int close_flag)
      * connected socket won't use it.
      */
     sockopt_len = (socklen_t) (sizeof(sctp_assoc_t) + 256 * sizeof(uint8_t));
-    authchunks = OPENSSL_malloc(sockopt_len);
+    authchunks = OPENSSL_zalloc(sockopt_len);
     if (!authchunks) {
         BIO_vfree(bio);
         return (NULL);
     }
-    memset(authchunks, 0, sockopt_len);
-    ret =
-        getsockopt(fd, IPPROTO_SCTP, SCTP_LOCAL_AUTH_CHUNKS, authchunks,
+    ret = getsockopt(fd, IPPROTO_SCTP, SCTP_LOCAL_AUTH_CHUNKS, authchunks,
                    &sockopt_len);
-
     if (ret < 0) {
         OPENSSL_free(authchunks);
         BIO_vfree(bio);
@@ -1086,10 +1084,9 @@ static int dgram_sctp_new(BIO *bi)
 
     bi->init = 0;
     bi->num = 0;
-    data = OPENSSL_malloc(sizeof(*data));
+    data = OPENSSL_zalloc(sizeof(*data));
     if (data == NULL)
         return 0;
-    memset(data, 0, sizeof(*data));
 #  ifdef SCTP_PR_SCTP_NONE
     data->prinfo.pr_policy = SCTP_PR_SCTP_NONE;
 #  endif

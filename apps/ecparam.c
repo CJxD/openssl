@@ -116,14 +116,14 @@ OPTIONS ecparam_options[] = {
     {NULL}
 };
 
-OPT_PAIR forms[] = {
+static OPT_PAIR forms[] = {
     {"compressed", POINT_CONVERSION_COMPRESSED},
     {"uncompressed", POINT_CONVERSION_UNCOMPRESSED},
     {"hybrid", POINT_CONVERSION_HYBRID},
     {NULL}
 };
 
-OPT_PAIR encodings[] = {
+static OPT_PAIR encodings[] = {
     {"named_curve", OPENSSL_EC_NAMED_CURVE},
     {"explicit", 0},
     {NULL}
@@ -223,10 +223,10 @@ int ecparam_main(int argc, char **argv)
     if (!app_load_modules(NULL))
         goto end;
 
-    in = bio_open_default(infile, RB(informat));
+    in = bio_open_default(infile, 'r', informat);
     if (in == NULL)
         goto end;
-    out = bio_open_owner(outfile, WB(outformat), private);
+    out = bio_open_owner(outfile, outformat, private);
     if (out == NULL)
         goto end;
 
