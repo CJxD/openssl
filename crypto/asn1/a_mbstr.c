@@ -1,4 +1,3 @@
-/* a_mbstr.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -200,7 +199,7 @@ int ASN1_mbstring_ncopy(ASN1_STRING **out, const unsigned char *in, int len,
     } else {
         free_out = 1;
         dest = ASN1_STRING_type_new(str_type);
-        if (!dest) {
+        if (dest == NULL) {
             ASN1err(ASN1_F_ASN1_MBSTRING_NCOPY, ERR_R_MALLOC_FAILURE);
             return -1;
         }

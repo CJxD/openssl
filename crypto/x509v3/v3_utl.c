@@ -1,4 +1,3 @@
-/* v3_utl.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -65,6 +64,7 @@
 #include <openssl/x509v3.h>
 #include "internal/x509_int.h"
 #include <openssl/bn.h>
+#include "ext_dat.h"
 
 static char *strip_spaces(char *name);
 static int sk_strcmp(const char *const *a, const char *const *b);
@@ -86,9 +86,9 @@ int X509V3_add_value(const char *name, const char *value,
     CONF_VALUE *vtmp = NULL;
     char *tname = NULL, *tvalue = NULL;
 
-    if (name && (tname = BUF_strdup(name)) == NULL)
+    if (name && (tname = OPENSSL_strdup(name)) == NULL)
         goto err;
-    if (value && (tvalue = BUF_strdup(value)) == NULL)
+    if (value && (tvalue = OPENSSL_strdup(value)) == NULL)
         goto err;
     if ((vtmp = OPENSSL_malloc(sizeof(*vtmp))) == NULL)
         goto err;
@@ -176,11 +176,15 @@ ASN1_INTEGER *s2i_ASN1_INTEGER(X509V3_EXT_METHOD *method, char *value)
     ASN1_INTEGER *aint;
     int isneg, ishex;
     int ret;
-    if (!value) {
+    if (value == NULL) {
         X509V3err(X509V3_F_S2I_ASN1_INTEGER, X509V3_R_INVALID_NULL_VALUE);
-        return 0;
+        return NULL;
     }
     bn = BN_new();
+    if (bn == NULL) {
+        X509V3err(X509V3_F_S2I_ASN1_INTEGER, ERR_R_MALLOC_FAILURE);
+        return NULL;
+    }
     if (value[0] == '-') {
         value++;
         isneg = 1;
@@ -201,7 +205,7 @@ ASN1_INTEGER *s2i_ASN1_INTEGER(X509V3_EXT_METHOD *method, char *value)
     if (!ret || value[ret]) {
         BN_free(bn);
         X509V3err(X509V3_F_S2I_ASN1_INTEGER, X509V3_R_BN_DEC2BN_ERROR);
-        return 0;
+        return NULL;
     }
 
     if (isneg && BN_is_zero(bn))
@@ -212,7 +216,7 @@ ASN1_INTEGER *s2i_ASN1_INTEGER(X509V3_EXT_METHOD *method, char *value)
     if (!aint) {
         X509V3err(X509V3_F_S2I_ASN1_INTEGER,
                   X509V3_R_BN_TO_ASN1_INTEGER_ERROR);
-        return 0;
+        return NULL;
     }
     if (isneg)
         aint->type |= V_ASN1_NEG;
@@ -292,7 +296,7 @@ STACK_OF(CONF_VALUE) *X509V3_parse_list(const char *line)
     char *linebuf;
     int state;
     /* We are going to modify the line so copy it first */
-    linebuf = BUF_strdup(line);
+    linebuf = OPENSSL_strdup(line);
     if (linebuf == NULL) {
         X509V3err(X509V3_F_X509V3_PARSE_LIST, ERR_R_MALLOC_FAILURE);
         goto err;
@@ -392,108 +396,6 @@ static char *strip_spaces(char *name)
     return p;
 }
 
-/* hex string utilities */
-
-/*
- * Given a buffer of length 'len' return a OPENSSL_malloc'ed string with its
- * hex representation @@@ (Contents of buffer are always kept in ASCII, also
- * on EBCDIC machines)
- */
-
-char *hex_to_string(const unsigned char *buffer, long len)
-{
-    char *tmp, *q;
-    const unsigned char *p;
-    int i;
-    const static char hexdig[] = "0123456789ABCDEF";
-    if (!buffer || !len)
-        return NULL;
-    if ((tmp = OPENSSL_malloc(len * 3 + 1)) == NULL) {
-        X509V3err(X509V3_F_HEX_TO_STRING, ERR_R_MALLOC_FAILURE);
-        return NULL;
-    }
-    q = tmp;
-    for (i = 0, p = buffer; i < len; i++, p++) {
-        *q++ = hexdig[(*p >> 4) & 0xf];
-        *q++ = hexdig[*p & 0xf];
-        *q++ = ':';
-    }
-    q[-1] = 0;
-#ifdef CHARSET_EBCDIC
-    ebcdic2ascii(tmp, tmp, q - tmp - 1);
-#endif
-
-    return tmp;
-}
-
-/*
- * Give a string of hex digits convert to a buffer
- */
-
-unsigned char *string_to_hex(const char *str, long *len)
-{
-    unsigned char *hexbuf, *q;
-    unsigned char ch, cl, *p;
-    if (!str) {
-        X509V3err(X509V3_F_STRING_TO_HEX, X509V3_R_INVALID_NULL_ARGUMENT);
-        return NULL;
-    }
-    if ((hexbuf = OPENSSL_malloc(strlen(str) >> 1)) == NULL)
-        goto err;
-    for (p = (unsigned char *)str, q = hexbuf; *p;) {
-        ch = *p++;
-#ifdef CHARSET_EBCDIC
-        ch = os_toebcdic[ch];
-#endif
-        if (ch == ':')
-            continue;
-        cl = *p++;
-#ifdef CHARSET_EBCDIC
-        cl = os_toebcdic[cl];
-#endif
-        if (!cl) {
-            X509V3err(X509V3_F_STRING_TO_HEX, X509V3_R_ODD_NUMBER_OF_DIGITS);
-            OPENSSL_free(hexbuf);
-            return NULL;
-        }
-        if (isupper(ch))
-            ch = tolower(ch);
-        if (isupper(cl))
-            cl = tolower(cl);
-
-        if ((ch >= '0') && (ch <= '9'))
-            ch -= '0';
-        else if ((ch >= 'a') && (ch <= 'f'))
-            ch -= 'a' - 10;
-        else
-            goto badhex;
-
-        if ((cl >= '0') && (cl <= '9'))
-            cl -= '0';
-        else if ((cl >= 'a') && (cl <= 'f'))
-            cl -= 'a' - 10;
-        else
-            goto badhex;
-
-        *q++ = (ch << 4) | cl;
-    }
-
-    if (len)
-        *len = q - hexbuf;
-
-    return hexbuf;
-
- err:
-    OPENSSL_free(hexbuf);
-    X509V3err(X509V3_F_STRING_TO_HEX, ERR_R_MALLOC_FAILURE);
-    return NULL;
-
- badhex:
-    OPENSSL_free(hexbuf);
-    X509V3err(X509V3_F_STRING_TO_HEX, X509V3_R_ILLEGAL_HEX_DIGIT);
-    return NULL;
-
-}
 
 /*
  * V2I name comparison function: returns zero if 'name' matches cmp or cmp.*
@@ -606,15 +508,15 @@ static int append_ia5(STACK_OF(OPENSSL_STRING) **sk, ASN1_IA5STRING *email)
         return 1;
     if (!email->data || !email->length)
         return 1;
-    if (!*sk)
+    if (*sk == NULL)
         *sk = sk_OPENSSL_STRING_new(sk_strcmp);
-    if (!*sk)
+    if (*sk == NULL)
         return 0;
     /* Don't add duplicates */
     if (sk_OPENSSL_STRING_find(*sk, (char *)email->data) != -1)
         return 1;
-    emtmp = BUF_strdup((char *)email->data);
-    if (!emtmp || !sk_OPENSSL_STRING_push(*sk, emtmp)) {
+    emtmp = OPENSSL_strdup((char *)email->data);
+    if (emtmp == NULL || !sk_OPENSSL_STRING_push(*sk, emtmp)) {
         X509_email_free(*sk);
         *sk = NULL;
         return 0;
@@ -633,7 +535,7 @@ typedef int (*equal_fn) (const unsigned char *pattern, size_t pattern_len,
 
 /* Skip pattern prefix to match "wildcard" subject */
 static void skip_prefix(const unsigned char **p, size_t *plen,
-                        const unsigned char *subject, size_t subject_len,
+                        size_t subject_len,
                         unsigned int flags)
 {
     const unsigned char *pattern = *p;
@@ -668,7 +570,7 @@ static int equal_nocase(const unsigned char *pattern, size_t pattern_len,
                         const unsigned char *subject, size_t subject_len,
                         unsigned int flags)
 {
-    skip_prefix(&pattern, &pattern_len, subject, subject_len, flags);
+    skip_prefix(&pattern, &pattern_len, subject_len, flags);
     if (pattern_len != subject_len)
         return 0;
     while (pattern_len) {
@@ -697,7 +599,7 @@ static int equal_case(const unsigned char *pattern, size_t pattern_len,
                       const unsigned char *subject, size_t subject_len,
                       unsigned int flags)
 {
-    skip_prefix(&pattern, &pattern_len, subject, subject_len, flags);
+    skip_prefix(&pattern, &pattern_len, subject_len, flags);
     if (pattern_len != subject_len)
         return 0;
     return !memcmp(pattern, subject, pattern_len);
@@ -836,7 +738,8 @@ static const unsigned char *valid_star(const unsigned char *p, size_t len,
             state = LABEL_START;
             ++dots;
         } else if (p[i] == '-') {
-            if ((state & LABEL_HYPHEN) != 0)
+            /* no domain/subdomain starts with '-' */
+            if ((state & LABEL_START) != 0)
                 return NULL;
             state |= LABEL_HYPHEN;
         } else
@@ -895,7 +798,7 @@ static int do_check_string(ASN1_STRING *a, int cmp_type, equal_fn equal,
         else if (a->length == (int)blen && !memcmp(a->data, b, blen))
             rv = 1;
         if (rv > 0 && peername)
-            *peername = BUF_strndup((char *)a->data, a->length);
+            *peername = OPENSSL_strndup((char *)a->data, a->length);
     } else {
         int astrlen;
         unsigned char *astr;
@@ -909,7 +812,7 @@ static int do_check_string(ASN1_STRING *a, int cmp_type, equal_fn equal,
         }
         rv = equal(astr, astrlen, (unsigned char *)b, blen, flags);
         if (rv > 0 && peername)
-            *peername = BUF_strndup((char *)astr, astrlen);
+            *peername = OPENSSL_strndup((char *)astr, astrlen);
         OPENSSL_free(astr);
     }
     return rv;
@@ -974,14 +877,12 @@ static int do_x509_check(X509 *x, const char *chk, size_t chklen,
         GENERAL_NAMES_free(gens);
         if (rv != 0)
             return rv;
-        if (cnid == NID_undef
-            || (san_present
-                && !(flags & X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT)))
+        if (san_present && !(flags & X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT))
             return 0;
     }
 
     /* We're done if CN-ID is not pertinent */
-    if (cnid == NID_undef)
+    if (cnid == NID_undef || (flags & X509_CHECK_FLAG_NEVER_CHECK_SUBJECT))
         return 0;
 
     i = -1;
@@ -1077,7 +978,7 @@ ASN1_OCTET_STRING *a2i_IPADDRESS(const char *ipasc)
         return NULL;
 
     ret = ASN1_OCTET_STRING_new();
-    if (!ret)
+    if (ret == NULL)
         return NULL;
     if (!ASN1_OCTET_STRING_set(ret, ipout, iplen)) {
         ASN1_OCTET_STRING_free(ret);
@@ -1095,7 +996,7 @@ ASN1_OCTET_STRING *a2i_IPADDRESS_NC(const char *ipasc)
     p = strchr(ipasc, '/');
     if (!p)
         return NULL;
-    iptmp = BUF_strdup(ipasc);
+    iptmp = OPENSSL_strdup(ipasc);
     if (!iptmp)
         return NULL;
     p = iptmp + (p - ipasc);
@@ -1115,7 +1016,7 @@ ASN1_OCTET_STRING *a2i_IPADDRESS_NC(const char *ipasc)
         goto err;
 
     ret = ASN1_OCTET_STRING_new();
-    if (!ret)
+    if (ret == NULL)
         goto err;
     if (!ASN1_OCTET_STRING_set(ret, ipout, iplen1 + iplen2))
         goto err;
@@ -1299,7 +1200,7 @@ int X509V3_NAME_from_section(X509_NAME *nm, STACK_OF(CONF_VALUE) *dn_sk,
                              unsigned long chtype)
 {
     CONF_VALUE *v;
-    int i, mval;
+    int i, mval, spec_char, plus_char;
     char *p, *type;
     if (!nm)
         return 0;
@@ -1310,25 +1211,26 @@ int X509V3_NAME_from_section(X509_NAME *nm, STACK_OF(CONF_VALUE) *dn_sk,
         /*
          * Skip past any leading X. X: X, etc to allow for multiple instances
          */
-        for (p = type; *p; p++)
+        for (p = type; *p; p++) {
 #ifndef CHARSET_EBCDIC
-            if ((*p == ':') || (*p == ',') || (*p == '.'))
+            spec_char = ((*p == ':') || (*p == ',') || (*p == '.'));
 #else
-            if ((*p == os_toascii[':']) || (*p == os_toascii[','])
-                || (*p == os_toascii['.']))
+            spec_char = ((*p == os_toascii[':']) || (*p == os_toascii[','])
+                    || (*p == os_toascii['.']));
 #endif
-            {
+            if (spec_char) {
                 p++;
                 if (*p)
                     type = p;
                 break;
             }
+        }
 #ifndef CHARSET_EBCDIC
-        if (*type == '+')
+        plus_char = (*type == '+');
 #else
-        if (*type == os_toascii['+'])
+        plus_char = (*type == os_toascii['+']);
 #endif
-        {
+        if (plus_char) {
             mval = -1;
             type++;
         } else

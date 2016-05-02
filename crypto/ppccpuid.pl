@@ -1,4 +1,11 @@
-#!/usr/bin/env perl
+#! /usr/bin/env perl
+# Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the OpenSSL license (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
 
 $flavour = shift;
 
@@ -23,6 +30,14 @@ $code=<<___;
 .machine	"any"
 .text
 
+.globl	.OPENSSL_fpu_probe
+.align	4
+.OPENSSL_fpu_probe:
+	fmr	f0,f0
+	blr
+	.long	0
+	.byte	0,12,0x14,0,0,0,0,0
+.size	.OPENSSL_fpu_probe,.-.OPENSSL_fpu_probe
 .globl	.OPENSSL_ppc64_probe
 .align	4
 .OPENSSL_ppc64_probe:
@@ -51,6 +66,16 @@ $code=<<___;
 	.long	0
 	.byte	0,12,0x14,0,0,0,0,0
 .size	.OPENSSL_crypto207_probe,.-.OPENSSL_crypto207_probe
+
+.globl	.OPENSSL_madd300_probe
+.align	4
+.OPENSSL_madd300_probe:
+	xor	r0,r0,r0
+	maddld	r3,r0,r0,r0
+	maddhdu	r3,r0,r0,r0
+	blr
+	.long	0
+	.byte	0,12,0x14,0,0,0,0,0
 
 .globl	.OPENSSL_wipe_cpu
 .align	4
@@ -102,8 +127,19 @@ Ladd:	lwarx	r5,0,r3
 .globl	.OPENSSL_rdtsc
 .align	4
 .OPENSSL_rdtsc:
+___
+$code.=<<___	if ($flavour =~ /64/);
+	mftb	r3
+___
+$code.=<<___	if ($flavour !~ /64/);
+Loop_rdtsc:
+	mftbu	r5
 	mftb	r3
 	mftbu	r4
+	cmplw	r4,r5
+	bne	Loop_rdtsc
+___
+$code.=<<___;
 	blr
 	.long	0
 	.byte	0,12,0x14,0,0,0,0,0

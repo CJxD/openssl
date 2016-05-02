@@ -55,8 +55,11 @@
  * [including the GNU Public Licence.]
  */
 
-#include <openssl/opensslconf.h> /* for OPENSSL_NO_DSA */
-#ifndef OPENSSL_NO_DSA
+#include <openssl/opensslconf.h>
+#ifdef OPENSSL_NO_DSA
+NON_EMPTY_TRANSLATION_UNIT
+#else
+
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
@@ -82,7 +85,7 @@ OPTIONS dsa_options[] = {
     {"help", OPT_HELP, '-', "Display this summary"},
     {"inform", OPT_INFORM, 'F', "Input format, DER PEM PVK"},
     {"outform", OPT_OUTFORM, 'F', "Output format, DER PEM PVK"},
-    {"in", OPT_IN, '<', "Input file"},
+    {"in", OPT_IN, 's', "Input key"},
     {"out", OPT_OUT, '>', "Output file"},
     {"noout", OPT_NOOUT, '-', "Don't print key out"},
     {"text", OPT_TEXT, '-', "Print the key in text"},
@@ -113,7 +116,10 @@ int dsa_main(int argc, char **argv)
     char *passin = NULL, *passout = NULL, *passinarg = NULL, *passoutarg = NULL;
     OPTION_CHOICE o;
     int informat = FORMAT_PEM, outformat = FORMAT_PEM, text = 0, noout = 0;
-    int i, modulus = 0, pubin = 0, pubout = 0, pvk_encr = 2, ret = 1;
+    int i, modulus = 0, pubin = 0, pubout = 0, ret = 1;
+# ifndef OPENSSL_NO_RC4
+    int pvk_encr = 2;
+# endif
     int private = 0;
 
     prog = opt_init(argc, argv, dsa_options);
@@ -130,8 +136,7 @@ int dsa_main(int argc, char **argv)
             ret = 0;
             goto end;
         case OPT_INFORM:
-            if (!opt_format
-                (opt_arg(), OPT_FMT_PEMDER | OPT_FMT_PVK, &informat))
+            if (!opt_format(opt_arg(), OPT_FMT_ANY, &informat))
                 goto opthelp;
             break;
         case OPT_IN:
@@ -192,18 +197,17 @@ int dsa_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
+    if (argc != 0)
+        goto opthelp;
+
     private = pubin || pubout ? 0 : 1;
-    if (text)
+    if (text && !pubin)
         private = 1;
 
     if (!app_passwd(passinarg, passoutarg, &passin, &passout)) {
         BIO_printf(bio_err, "Error getting passwords\n");
         goto end;
     }
-
-    if (!app_load_modules(NULL))
-        goto end;
 
     BIO_printf(bio_err, "read DSA key\n");
     {
@@ -230,7 +234,7 @@ int dsa_main(int argc, char **argv)
         goto end;
 
     if (text) {
-        assert(private);
+        assert(pubin || private);
         if (!DSA_print(out, dsa, 0)) {
             perror(outfile);
             ERR_print_errors(bio_err);
@@ -239,8 +243,10 @@ int dsa_main(int argc, char **argv)
     }
 
     if (modulus) {
+        BIGNUM *pub_key = NULL;
+        DSA_get0_key(dsa, &pub_key, NULL);
         BIO_printf(out, "Public Key=");
-        BN_print(out, dsa->pub_key);
+        BN_print(out, pub_key);
         BIO_printf(out, "\n");
     }
 
@@ -270,6 +276,11 @@ int dsa_main(int argc, char **argv)
         pk = EVP_PKEY_new();
         EVP_PKEY_set1_DSA(pk, dsa);
         if (outformat == FORMAT_PVK) {
+            if (pubin) {
+                BIO_printf(bio_err, "PVK form impossible with public key input\n");
+                EVP_PKEY_free(pk);
+                goto end;
+            }
             assert(private);
             i = i2b_PVK_bio(out, pk, pvk_encr, 0, passout);
         }
@@ -298,10 +309,4 @@ int dsa_main(int argc, char **argv)
     OPENSSL_free(passout);
     return (ret);
 }
-#else                           /* !OPENSSL_NO_DSA */
-
-# if PEDANTIC
-static void *dummy = &dummy;
-# endif
-
 #endif

@@ -1,4 +1,3 @@
-/* crypto/x509/x509_cmp.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -72,7 +71,7 @@ int X509_issuer_and_serial_cmp(const X509 *a, const X509 *b)
 
     ai = &a->cert_info;
     bi = &b->cert_info;
-    i = ASN1_INTEGER_cmp(ai->serialNumber, bi->serialNumber);
+    i = ASN1_INTEGER_cmp(&ai->serialNumber, &bi->serialNumber);
     if (i)
         return (i);
     return (X509_NAME_cmp(ai->issuer, bi->issuer));
@@ -82,28 +81,29 @@ int X509_issuer_and_serial_cmp(const X509 *a, const X509 *b)
 unsigned long X509_issuer_and_serial_hash(X509 *a)
 {
     unsigned long ret = 0;
-    EVP_MD_CTX ctx;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     unsigned char md[16];
     char *f;
 
-    EVP_MD_CTX_init(&ctx);
-    f = X509_NAME_oneline(a->cert_info.issuer, NULL, 0);
-    if (!EVP_DigestInit_ex(&ctx, EVP_md5(), NULL))
+    if (ctx == NULL)
         goto err;
-    if (!EVP_DigestUpdate(&ctx, (unsigned char *)f, strlen(f)))
+    f = X509_NAME_oneline(a->cert_info.issuer, NULL, 0);
+    if (!EVP_DigestInit_ex(ctx, EVP_md5(), NULL))
+        goto err;
+    if (!EVP_DigestUpdate(ctx, (unsigned char *)f, strlen(f)))
         goto err;
     OPENSSL_free(f);
     if (!EVP_DigestUpdate
-        (&ctx, (unsigned char *)a->cert_info.serialNumber->data,
-         (unsigned long)a->cert_info.serialNumber->length))
+        (ctx, (unsigned char *)a->cert_info.serialNumber.data,
+         (unsigned long)a->cert_info.serialNumber.length))
         goto err;
-    if (!EVP_DigestFinal_ex(&ctx, &(md[0]), NULL))
+    if (!EVP_DigestFinal_ex(ctx, &(md[0]), NULL))
         goto err;
     ret = (((unsigned long)md[0]) | ((unsigned long)md[1] << 8L) |
            ((unsigned long)md[2] << 16L) | ((unsigned long)md[3] << 24L)
         ) & 0xffffffffL;
  err:
-    EVP_MD_CTX_cleanup(&ctx);
+    EVP_MD_CTX_free(ctx);
     return (ret);
 }
 #endif
@@ -152,7 +152,7 @@ X509_NAME *X509_get_subject_name(X509 *a)
 
 ASN1_INTEGER *X509_get_serialNumber(X509 *a)
 {
-    return (a->cert_info.serialNumber);
+    return &a->cert_info.serialNumber;
 }
 
 unsigned long X509_subject_name_hash(X509 *x)
@@ -187,9 +187,10 @@ int X509_cmp(const X509 *a, const X509 *b)
         return rv;
     /* Check for match against stored encoding too */
     if (!a->cert_info.enc.modified && !b->cert_info.enc.modified) {
-        rv = (int)(a->cert_info.enc.len - b->cert_info.enc.len);
-        if (rv)
-            return rv;
+        if (a->cert_info.enc.len < b->cert_info.enc.len)
+            return -1;
+        if (a->cert_info.enc.len > b->cert_info.enc.len)
+            return 1;
         return memcmp(a->cert_info.enc.enc, b->cert_info.enc.enc,
                       a->cert_info.enc.len);
     }
@@ -248,21 +249,23 @@ unsigned long X509_NAME_hash(X509_NAME *x)
 
 unsigned long X509_NAME_hash_old(X509_NAME *x)
 {
-    EVP_MD_CTX md_ctx;
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
     unsigned long ret = 0;
     unsigned char md[16];
 
+    if (md_ctx == NULL)
+        return ret;
+
     /* Make sure X509_NAME structure contains valid cached encoding */
     i2d_X509_NAME(x, NULL);
-    EVP_MD_CTX_init(&md_ctx);
-    EVP_MD_CTX_set_flags(&md_ctx, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
-    if (EVP_DigestInit_ex(&md_ctx, EVP_md5(), NULL)
-        && EVP_DigestUpdate(&md_ctx, x->bytes->data, x->bytes->length)
-        && EVP_DigestFinal_ex(&md_ctx, md, NULL))
+    EVP_MD_CTX_set_flags(md_ctx, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
+    if (EVP_DigestInit_ex(md_ctx, EVP_md5(), NULL)
+        && EVP_DigestUpdate(md_ctx, x->bytes->data, x->bytes->length)
+        && EVP_DigestFinal_ex(md_ctx, md, NULL))
         ret = (((unsigned long)md[0]) | ((unsigned long)md[1] << 8L) |
                ((unsigned long)md[2] << 16L) | ((unsigned long)md[3] << 24L)
             ) & 0xffffffffL;
-    EVP_MD_CTX_cleanup(&md_ctx);
+    EVP_MD_CTX_free(md_ctx);
 
     return (ret);
 }
@@ -278,7 +281,7 @@ X509 *X509_find_by_issuer_and_serial(STACK_OF(X509) *sk, X509_NAME *name,
     if (!sk)
         return NULL;
 
-    x.cert_info.serialNumber = serial;
+    x.cert_info.serialNumber = *serial;
     x.cert_info.issuer = name;
 
     for (i = 0; i < sk_X509_num(sk); i++) {
@@ -302,18 +305,18 @@ X509 *X509_find_by_subject(STACK_OF(X509) *sk, X509_NAME *name)
     return (NULL);
 }
 
+EVP_PKEY *X509_get0_pubkey(X509 *x)
+{
+    if (x == NULL)
+        return NULL;
+    return X509_PUBKEY_get0(x->cert_info.key);
+}
+
 EVP_PKEY *X509_get_pubkey(X509 *x)
 {
     if (x == NULL)
-        return (NULL);
-    return (X509_PUBKEY_get(x->cert_info.key));
-}
-
-ASN1_BIT_STRING *X509_get0_pubkey_bitstr(const X509 *x)
-{
-    if (!x)
         return NULL;
-    return x->cert_info.key->public_key;
+    return X509_PUBKEY_get(x->cert_info.key);
 }
 
 int X509_check_private_key(X509 *x, EVP_PKEY *k)
@@ -321,7 +324,7 @@ int X509_check_private_key(X509 *x, EVP_PKEY *k)
     EVP_PKEY *xk;
     int ret;
 
-    xk = X509_get_pubkey(x);
+    xk = X509_get0_pubkey(x);
 
     if (xk)
         ret = EVP_PKEY_cmp(xk, k);
@@ -340,7 +343,6 @@ int X509_check_private_key(X509 *x, EVP_PKEY *k)
     case -2:
         X509err(X509_F_X509_CHECK_PRIVATE_KEY, X509_R_UNKNOWN_KEY_TYPE);
     }
-    EVP_PKEY_free(xk);
     if (ret > 0)
         return 1;
     return 0;
@@ -358,8 +360,8 @@ static int check_suite_b(EVP_PKEY *pkey, int sign_nid, unsigned long *pflags)
 {
     const EC_GROUP *grp = NULL;
     int curve_nid;
-    if (pkey && pkey->type == EVP_PKEY_EC)
-        grp = EC_KEY_get0_group(pkey->pkey.ec);
+    if (pkey && EVP_PKEY_id(pkey) == EVP_PKEY_EC)
+        grp = EC_KEY_get0_group(EVP_PKEY_get0_EC_KEY(pkey));
     if (!grp)
         return X509_V_ERR_SUITE_B_INVALID_ALGORITHM;
     curve_nid = EC_GROUP_get_curve_name(grp);
@@ -389,17 +391,29 @@ int X509_chain_check_suiteb(int *perror_depth, X509 *x, STACK_OF(X509) *chain,
                             unsigned long flags)
 {
     int rv, i, sign_nid;
-    EVP_PKEY *pk = NULL;
-    unsigned long tflags;
+    EVP_PKEY *pk;
+    unsigned long tflags = flags;
+
     if (!(flags & X509_V_FLAG_SUITEB_128_LOS))
         return X509_V_OK;
-    tflags = flags;
+
     /* If no EE certificate passed in must be first in chain */
     if (x == NULL) {
         x = sk_X509_value(chain, 0);
         i = 1;
     } else
         i = 0;
+
+    pk = X509_get0_pubkey(x);
+
+    /*
+     * With DANE-EE(3) success, or DANE-EE(3)/PKIX-EE(1) failure we don't build
+     * a chain all, just report trust success or failure, but must also report
+     * Suite-B errors if applicable.  This is indicated via a NULL chain
+     * pointer.  All we need to do is check the leaf key algorithm.
+     */
+    if (chain == NULL)
+        return check_suite_b(pk, -1, &tflags);
 
     if (X509_get_version(x) != 2) {
         rv = X509_V_ERR_SUITE_B_INVALID_VERSION;
@@ -408,7 +422,6 @@ int X509_chain_check_suiteb(int *perror_depth, X509 *x, STACK_OF(X509) *chain,
         goto end;
     }
 
-    pk = X509_get_pubkey(x);
     /* Check EE key only */
     rv = check_suite_b(pk, -1, &tflags);
     if (rv != X509_V_OK) {
@@ -423,8 +436,7 @@ int X509_chain_check_suiteb(int *perror_depth, X509 *x, STACK_OF(X509) *chain,
             rv = X509_V_ERR_SUITE_B_INVALID_VERSION;
             goto end;
         }
-        EVP_PKEY_free(pk);
-        pk = X509_get_pubkey(x);
+        pk = X509_get0_pubkey(x);
         rv = check_suite_b(pk, sign_nid, &tflags);
         if (rv != X509_V_OK)
             goto end;
@@ -433,7 +445,6 @@ int X509_chain_check_suiteb(int *perror_depth, X509 *x, STACK_OF(X509) *chain,
     /* Final check: root CA signature */
     rv = check_suite_b(pk, X509_get_signature_nid(x), &tflags);
  end:
-    EVP_PKEY_free(pk);
     if (rv != X509_V_OK) {
         /* Invalid signature or LOS errors are for previous cert */
         if ((rv == X509_V_ERR_SUITE_B_INVALID_SIGNATURE_ALGORITHM
@@ -441,7 +452,7 @@ int X509_chain_check_suiteb(int *perror_depth, X509 *x, STACK_OF(X509) *chain,
             i--;
         /*
          * If we have LOS error and flags changed then we are signing P-384
-         * with P-256. Use more meaninggul error.
+         * with P-256. Use more meaningful error.
          */
         if (rv == X509_V_ERR_SUITE_B_LOS_NOT_ALLOWED && flags != tflags)
             rv = X509_V_ERR_SUITE_B_CANNOT_SIGN_P_384_WITH_P_256;

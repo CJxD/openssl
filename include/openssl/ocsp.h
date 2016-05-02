@@ -1,11 +1,10 @@
-/* ocsp.h */
 /*
  * Written by Tom Titchener <Tom_Titchener@groove.net> for the OpenSSL
  * project.
  */
 
 /*
- * History: This file was transfered to Richard Levitte from CertCo by Kathy
+ * History: This file was transferred to Richard Levitte from CertCo by Kathy
  * Weinhold in mid-spring 2000 to be included in OpenSSL or released as a
  * patch kit.
  */
@@ -67,74 +66,13 @@
 #ifndef HEADER_OCSP_H
 # define HEADER_OCSP_H
 
-# include <openssl/ossl_typ.h>
-# include <openssl/x509.h>
-# include <openssl/x509v3.h>
-# include <openssl/safestack.h>
+#include <openssl/opensslconf.h>
 
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
-/* Various flags and values */
-
-# define OCSP_DEFAULT_NONCE_LENGTH       16
-
-# define OCSP_NOCERTS                    0x1
-# define OCSP_NOINTERN                   0x2
-# define OCSP_NOSIGS                     0x4
-# define OCSP_NOCHAIN                    0x8
-# define OCSP_NOVERIFY                   0x10
-# define OCSP_NOEXPLICIT                 0x20
-# define OCSP_NOCASIGN                   0x40
-# define OCSP_NODELEGATED                0x80
-# define OCSP_NOCHECKS                   0x100
-# define OCSP_TRUSTOTHER                 0x200
-# define OCSP_RESPID_KEY                 0x400
-# define OCSP_NOTIME                     0x800
-
-typedef struct ocsp_cert_id_st OCSP_CERTID;
-
-DECLARE_STACK_OF(OCSP_CERTID)
-
-typedef struct ocsp_one_request_st OCSP_ONEREQ;
-
-DECLARE_STACK_OF(OCSP_ONEREQ)
-
-typedef struct ocsp_req_info_st OCSP_REQINFO;
-typedef struct ocsp_signature_st OCSP_SIGNATURE;
-typedef struct ocsp_request_st OCSP_REQUEST;
-
-# define OCSP_RESPONSE_STATUS_SUCCESSFUL          0
-# define OCSP_RESPONSE_STATUS_MALFORMEDREQUEST     1
-# define OCSP_RESPONSE_STATUS_INTERNALERROR        2
-# define OCSP_RESPONSE_STATUS_TRYLATER             3
-# define OCSP_RESPONSE_STATUS_SIGREQUIRED          5
-# define OCSP_RESPONSE_STATUS_UNAUTHORIZED         6
-
-typedef struct ocsp_resp_bytes_st OCSP_RESPBYTES;
-
-# define V_OCSP_RESPID_NAME 0
-# define V_OCSP_RESPID_KEY  1
-
-DECLARE_STACK_OF(OCSP_RESPID)
-DECLARE_ASN1_FUNCTIONS(OCSP_RESPID)
-
-typedef struct ocsp_revoked_info_st OCSP_REVOKEDINFO;
-
-# define V_OCSP_CERTSTATUS_GOOD    0
-# define V_OCSP_CERTSTATUS_REVOKED 1
-# define V_OCSP_CERTSTATUS_UNKNOWN 2
-
-typedef struct ocsp_cert_status_st OCSP_CERTSTATUS;
-typedef struct ocsp_single_response_st OCSP_SINGLERESP;
-
-DECLARE_STACK_OF(OCSP_SINGLERESP)
-
-typedef struct ocsp_response_data_st OCSP_RESPDATA;
-
-typedef struct ocsp_basic_response_st OCSP_BASICRESP;
-
+/*
+ * These definitions are outside the OPENSSL_NO_OCSP guard because although for
+ * historical reasons they have OCSP_* names, they can actually be used
+ * independently of OCSP. E.g. see RFC5280
+ */
 /*-
  *   CRLReason ::= ENUMERATED {
  *        unspecified             (0),
@@ -146,64 +84,135 @@ typedef struct ocsp_basic_response_st OCSP_BASICRESP;
  *        certificateHold         (6),
  *        removeFromCRL           (8) }
  */
-# define OCSP_REVOKED_STATUS_NOSTATUS               -1
-# define OCSP_REVOKED_STATUS_UNSPECIFIED             0
-# define OCSP_REVOKED_STATUS_KEYCOMPROMISE           1
-# define OCSP_REVOKED_STATUS_CACOMPROMISE            2
-# define OCSP_REVOKED_STATUS_AFFILIATIONCHANGED      3
-# define OCSP_REVOKED_STATUS_SUPERSEDED              4
-# define OCSP_REVOKED_STATUS_CESSATIONOFOPERATION    5
-# define OCSP_REVOKED_STATUS_CERTIFICATEHOLD         6
-# define OCSP_REVOKED_STATUS_REMOVEFROMCRL           8
+#  define OCSP_REVOKED_STATUS_NOSTATUS               -1
+#  define OCSP_REVOKED_STATUS_UNSPECIFIED             0
+#  define OCSP_REVOKED_STATUS_KEYCOMPROMISE           1
+#  define OCSP_REVOKED_STATUS_CACOMPROMISE            2
+#  define OCSP_REVOKED_STATUS_AFFILIATIONCHANGED      3
+#  define OCSP_REVOKED_STATUS_SUPERSEDED              4
+#  define OCSP_REVOKED_STATUS_CESSATIONOFOPERATION    5
+#  define OCSP_REVOKED_STATUS_CERTIFICATEHOLD         6
+#  define OCSP_REVOKED_STATUS_REMOVEFROMCRL           8
+
+
+# ifndef OPENSSL_NO_OCSP
+
+#  include <openssl/ossl_typ.h>
+#  include <openssl/x509.h>
+#  include <openssl/x509v3.h>
+#  include <openssl/safestack.h>
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
+/* Various flags and values */
+
+#  define OCSP_DEFAULT_NONCE_LENGTH       16
+
+#  define OCSP_NOCERTS                    0x1
+#  define OCSP_NOINTERN                   0x2
+#  define OCSP_NOSIGS                     0x4
+#  define OCSP_NOCHAIN                    0x8
+#  define OCSP_NOVERIFY                   0x10
+#  define OCSP_NOEXPLICIT                 0x20
+#  define OCSP_NOCASIGN                   0x40
+#  define OCSP_NODELEGATED                0x80
+#  define OCSP_NOCHECKS                   0x100
+#  define OCSP_TRUSTOTHER                 0x200
+#  define OCSP_RESPID_KEY                 0x400
+#  define OCSP_NOTIME                     0x800
+
+typedef struct ocsp_cert_id_st OCSP_CERTID;
+
+DEFINE_STACK_OF(OCSP_CERTID)
+
+typedef struct ocsp_one_request_st OCSP_ONEREQ;
+
+DEFINE_STACK_OF(OCSP_ONEREQ)
+
+typedef struct ocsp_req_info_st OCSP_REQINFO;
+typedef struct ocsp_signature_st OCSP_SIGNATURE;
+typedef struct ocsp_request_st OCSP_REQUEST;
+
+#  define OCSP_RESPONSE_STATUS_SUCCESSFUL           0
+#  define OCSP_RESPONSE_STATUS_MALFORMEDREQUEST     1
+#  define OCSP_RESPONSE_STATUS_INTERNALERROR        2
+#  define OCSP_RESPONSE_STATUS_TRYLATER             3
+#  define OCSP_RESPONSE_STATUS_SIGREQUIRED          5
+#  define OCSP_RESPONSE_STATUS_UNAUTHORIZED         6
+
+typedef struct ocsp_resp_bytes_st OCSP_RESPBYTES;
+
+#  define V_OCSP_RESPID_NAME 0
+#  define V_OCSP_RESPID_KEY  1
+
+DEFINE_STACK_OF(OCSP_RESPID)
+DECLARE_ASN1_FUNCTIONS(OCSP_RESPID)
+
+typedef struct ocsp_revoked_info_st OCSP_REVOKEDINFO;
+
+#  define V_OCSP_CERTSTATUS_GOOD    0
+#  define V_OCSP_CERTSTATUS_REVOKED 1
+#  define V_OCSP_CERTSTATUS_UNKNOWN 2
+
+typedef struct ocsp_cert_status_st OCSP_CERTSTATUS;
+typedef struct ocsp_single_response_st OCSP_SINGLERESP;
+
+DEFINE_STACK_OF(OCSP_SINGLERESP)
+
+typedef struct ocsp_response_data_st OCSP_RESPDATA;
+
+typedef struct ocsp_basic_response_st OCSP_BASICRESP;
 
 typedef struct ocsp_crl_id_st OCSP_CRLID;
 typedef struct ocsp_service_locator_st OCSP_SERVICELOC;
 
-# define PEM_STRING_OCSP_REQUEST "OCSP REQUEST"
-# define PEM_STRING_OCSP_RESPONSE "OCSP RESPONSE"
+#  define PEM_STRING_OCSP_REQUEST "OCSP REQUEST"
+#  define PEM_STRING_OCSP_RESPONSE "OCSP RESPONSE"
 
-# define d2i_OCSP_REQUEST_bio(bp,p) ASN1_d2i_bio_of(OCSP_REQUEST,OCSP_REQUEST_new,d2i_OCSP_REQUEST,bp,p)
+#  define d2i_OCSP_REQUEST_bio(bp,p) ASN1_d2i_bio_of(OCSP_REQUEST,OCSP_REQUEST_new,d2i_OCSP_REQUEST,bp,p)
 
-# define d2i_OCSP_RESPONSE_bio(bp,p) ASN1_d2i_bio_of(OCSP_RESPONSE,OCSP_RESPONSE_new,d2i_OCSP_RESPONSE,bp,p)
+#  define d2i_OCSP_RESPONSE_bio(bp,p) ASN1_d2i_bio_of(OCSP_RESPONSE,OCSP_RESPONSE_new,d2i_OCSP_RESPONSE,bp,p)
 
-# define PEM_read_bio_OCSP_REQUEST(bp,x,cb) (OCSP_REQUEST *)PEM_ASN1_read_bio( \
+#  define PEM_read_bio_OCSP_REQUEST(bp,x,cb) (OCSP_REQUEST *)PEM_ASN1_read_bio( \
      (char *(*)())d2i_OCSP_REQUEST,PEM_STRING_OCSP_REQUEST,bp,(char **)x,cb,NULL)
 
-# define PEM_read_bio_OCSP_RESPONSE(bp,x,cb)(OCSP_RESPONSE *)PEM_ASN1_read_bio(\
+#   define PEM_read_bio_OCSP_RESPONSE(bp,x,cb)(OCSP_RESPONSE *)PEM_ASN1_read_bio(\
      (char *(*)())d2i_OCSP_RESPONSE,PEM_STRING_OCSP_RESPONSE,bp,(char **)x,cb,NULL)
 
-# define PEM_write_bio_OCSP_REQUEST(bp,o) \
+#  define PEM_write_bio_OCSP_REQUEST(bp,o) \
     PEM_ASN1_write_bio((int (*)())i2d_OCSP_REQUEST,PEM_STRING_OCSP_REQUEST,\
                         bp,(char *)o, NULL,NULL,0,NULL,NULL)
 
-# define PEM_write_bio_OCSP_RESPONSE(bp,o) \
+#  define PEM_write_bio_OCSP_RESPONSE(bp,o) \
     PEM_ASN1_write_bio((int (*)())i2d_OCSP_RESPONSE,PEM_STRING_OCSP_RESPONSE,\
                         bp,(char *)o, NULL,NULL,0,NULL,NULL)
 
-# define i2d_OCSP_RESPONSE_bio(bp,o) ASN1_i2d_bio_of(OCSP_RESPONSE,i2d_OCSP_RESPONSE,bp,o)
+#  define i2d_OCSP_RESPONSE_bio(bp,o) ASN1_i2d_bio_of(OCSP_RESPONSE,i2d_OCSP_RESPONSE,bp,o)
 
-# define i2d_OCSP_REQUEST_bio(bp,o) ASN1_i2d_bio_of(OCSP_REQUEST,i2d_OCSP_REQUEST,bp,o)
+#  define i2d_OCSP_REQUEST_bio(bp,o) ASN1_i2d_bio_of(OCSP_REQUEST,i2d_OCSP_REQUEST,bp,o)
 
-# define OCSP_REQUEST_sign(o,pkey,md) \
+#  define OCSP_REQUEST_sign(o,pkey,md) \
         ASN1_item_sign(ASN1_ITEM_rptr(OCSP_REQINFO),\
-                o->optionalSignature->signatureAlgorithm,NULL,\
-                o->optionalSignature->signature,o->tbsRequest,pkey,md)
+                &o->optionalSignature->signatureAlgorithm,NULL,\
+                o->optionalSignature->signature,&o->tbsRequest,pkey,md)
 
-# define OCSP_BASICRESP_sign(o,pkey,md,d) \
-        ASN1_item_sign(ASN1_ITEM_rptr(OCSP_RESPDATA),o->signatureAlgorithm,NULL,\
-                o->signature,o->tbsResponseData,pkey,md)
+#  define OCSP_BASICRESP_sign(o,pkey,md,d) \
+        ASN1_item_sign(ASN1_ITEM_rptr(OCSP_RESPDATA),&o->signatureAlgorithm,NULL,\
+                o->signature,&o->tbsResponseData,pkey,md)
 
-# define OCSP_REQUEST_verify(a,r) ASN1_item_verify(ASN1_ITEM_rptr(OCSP_REQINFO),\
-        a->optionalSignature->signatureAlgorithm,\
-        a->optionalSignature->signature,a->tbsRequest,r)
+#  define OCSP_REQUEST_verify(a,r) ASN1_item_verify(ASN1_ITEM_rptr(OCSP_REQINFO),\
+        &a->optionalSignature->signatureAlgorithm,\
+        a->optionalSignature->signature,&a->tbsRequest,r)
 
-# define OCSP_BASICRESP_verify(a,r,d) ASN1_item_verify(ASN1_ITEM_rptr(OCSP_RESPDATA),\
-        a->signatureAlgorithm,a->signature,a->tbsResponseData,r)
+#  define OCSP_BASICRESP_verify(a,r,d) ASN1_item_verify(ASN1_ITEM_rptr(OCSP_RESPDATA),\
+        &a->signatureAlgorithm,a->signature,&a->tbsResponseData,r)
 
-# define ASN1_BIT_STRING_digest(data,type,md,len) \
+#  define ASN1_BIT_STRING_digest(data,type,md,len) \
         ASN1_item_digest(ASN1_ITEM_rptr(ASN1_BIT_STRING),type,data,md,len)
 
-# define OCSP_CERTSTATUS_dup(cs)\
+#  define OCSP_CERTSTATUS_dup(cs)\
                 (OCSP_CERTSTATUS*)ASN1_dup((int(*)())i2d_OCSP_CERTSTATUS,\
                 (char *(*)())d2i_OCSP_CERTSTATUS,(char *)(cs))
 
@@ -259,6 +268,7 @@ ASN1_OCTET_STRING *OCSP_resp_get0_signature(OCSP_BASICRESP *bs);
 
 int OCSP_resp_count(OCSP_BASICRESP *bs);
 OCSP_SINGLERESP *OCSP_resp_get0(OCSP_BASICRESP *bs, int idx);
+ASN1_GENERALIZEDTIME *OCSP_resp_get0_produced_at(OCSP_BASICRESP* bs);
 int OCSP_resp_find(OCSP_BASICRESP *bs, OCSP_CERTID *id, int last);
 int OCSP_single_get0_status(OCSP_SINGLERESP *single, int *reason,
                             ASN1_GENERALIZEDTIME **revtime,
@@ -359,6 +369,7 @@ void *OCSP_SINGLERESP_get1_ext_d2i(OCSP_SINGLERESP *x, int nid, int *crit,
 int OCSP_SINGLERESP_add1_ext_i2d(OCSP_SINGLERESP *x, int nid, void *value,
                                  int crit, unsigned long flags);
 int OCSP_SINGLERESP_add_ext(OCSP_SINGLERESP *x, X509_EXTENSION *ex, int loc);
+OCSP_CERTID *OCSP_SINGLERESP_get0_id(OCSP_SINGLERESP *x);
 
 DECLARE_ASN1_FUNCTIONS(OCSP_SINGLERESP)
 DECLARE_ASN1_FUNCTIONS(OCSP_CERTSTATUS)
@@ -431,6 +442,7 @@ void ERR_load_OCSP_strings(void);
 # define OCSP_R_NO_PUBLIC_KEY                             107
 # define OCSP_R_NO_RESPONSE_DATA                          108
 # define OCSP_R_NO_REVOKED_TIME                           109
+# define OCSP_R_NO_SIGNER_KEY                             130
 # define OCSP_R_PRIVATE_KEY_DOES_NOT_MATCH_CERTIFICATE    110
 # define OCSP_R_REQUEST_NOT_SIGNED                        128
 # define OCSP_R_RESPONSE_CONTAINS_NO_REVOCATION_DATA      111
@@ -451,4 +463,5 @@ void ERR_load_OCSP_strings(void);
 #ifdef  __cplusplus
 }
 #endif
+# endif
 #endif

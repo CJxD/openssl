@@ -1,4 +1,3 @@
-/* v3_pci.c -*- mode:C; c-file-style: "eay" -*- */
 /*
  * Contributed to the OpenSSL Project 2004 by Richard Levitte
  * (richard@levitte.org)
@@ -111,7 +110,7 @@ static int process_pci_value(CONF_VALUE *val,
         long val_len;
         if (!*policy) {
             *policy = ASN1_OCTET_STRING_new();
-            if (!*policy) {
+            if (*policy == NULL) {
                 X509V3err(X509V3_F_PROCESS_PCI_VALUE, ERR_R_MALLOC_FAILURE);
                 X509V3_conf_err(val);
                 return 0;
@@ -120,11 +119,9 @@ static int process_pci_value(CONF_VALUE *val,
         }
         if (strncmp(val->value, "hex:", 4) == 0) {
             unsigned char *tmp_data2 =
-                string_to_hex(val->value + 4, &val_len);
+                OPENSSL_hexstr2buf(val->value + 4, &val_len);
 
             if (!tmp_data2) {
-                X509V3err(X509V3_F_PROCESS_PCI_VALUE,
-                          X509V3_R_ILLEGAL_HEX_DIGIT);
                 X509V3_conf_err(val);
                 goto err;
             }
@@ -293,7 +290,7 @@ static PROXY_CERT_INFO_EXTENSION *r2i_pci(X509V3_EXT_METHOD *method,
     }
 
     pci = PROXY_CERT_INFO_EXTENSION_new();
-    if (!pci) {
+    if (pci == NULL) {
         X509V3err(X509V3_F_R2I_PCI, ERR_R_MALLOC_FAILURE);
         goto err;
     }

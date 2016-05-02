@@ -1,4 +1,3 @@
-/* crypto/bn/bn_prime.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -116,12 +115,6 @@
 #include <openssl/rand.h>
 
 /*
- * NB: these functions have been "upgraded", the deprecated versions (which
- * are compatibility wrappers using these functions) are in bn_depr.c. -
- * Geoff
- */
-
-/*
  * The quick sieve algorithm approach to weeding out primes is Philip
  * Zimmermann's, as implemented in PGP.  I have had a read of his comments
  * and implemented my own version.
@@ -215,9 +208,6 @@ int BN_generate_prime_ex(BIGNUM *ret, int bits, int safe,
     prime_t *mods = NULL;
     int checks = BN_prime_checks_for_size(bits);
 
-    mods = OPENSSL_zalloc(sizeof(*mods) * NUMPRIMES);
-    if (mods == NULL)
-        goto err;
     if (bits < 2) {
         /* There are no prime numbers this small. */
         BNerr(BN_F_BN_GENERATE_PRIME_EX, BN_R_BITS_TOO_SMALL);
@@ -227,6 +217,10 @@ int BN_generate_prime_ex(BIGNUM *ret, int bits, int safe,
         BNerr(BN_F_BN_GENERATE_PRIME_EX, BN_R_BITS_TOO_SMALL);
         return 0;
     }
+
+    mods = OPENSSL_zalloc(sizeof(*mods) * NUMPRIMES);
+    if (mods == NULL)
+        goto err;
 
     ctx = BN_CTX_new();
     if (ctx == NULL)

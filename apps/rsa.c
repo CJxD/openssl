@@ -104,7 +104,10 @@
  */
 
 #include <openssl/opensslconf.h>
-#ifndef OPENSSL_NO_RSA
+#ifdef OPENSSL_NO_RSA
+NON_EMPTY_TRANSLATION_UNIT
+#else
+
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
@@ -130,7 +133,7 @@ OPTIONS rsa_options[] = {
     {"help", OPT_HELP, '-', "Display this summary"},
     {"inform", OPT_INFORM, 'f', "Input format, one of DER NET PEM"},
     {"outform", OPT_OUTFORM, 'f', "Output format, one of DER NET PEM PVK"},
-    {"in", OPT_IN, '<', "Input file"},
+    {"in", OPT_IN, 's', "Input file"},
     {"out", OPT_OUT, '>', "Output file"},
     {"pubin", OPT_PUBIN, '-', "Expect a public key in input file"},
     {"pubout", OPT_PUBOUT, '-', "Output a public key"},
@@ -164,7 +167,10 @@ int rsa_main(int argc, char **argv)
     char *passin = NULL, *passout = NULL, *passinarg = NULL, *passoutarg = NULL;
     int i, private = 0;
     int informat = FORMAT_PEM, outformat = FORMAT_PEM, text = 0, check = 0;
-    int noout = 0, modulus = 0, pubin = 0, pubout = 0, pvk_encr = 2, ret = 1;
+    int noout = 0, modulus = 0, pubin = 0, pubout = 0, ret = 1;
+# if !defined(OPENSSL_NO_DSA) && !defined(OPENSSL_NO_RC4)
+    int pvk_encr = 2;
+#endif
     OPTION_CHOICE o;
 
     prog = opt_init(argc, argv, rsa_options);
@@ -214,7 +220,7 @@ int rsa_main(int argc, char **argv)
         case OPT_RSAPUBKEY_OUT:
             pubout = 2;
             break;
-#ifndef OPENSSL_NO_RC4
+# if !defined(OPENSSL_NO_DSA) && !defined(OPENSSL_NO_RC4)
         case OPT_PVK_STRONG:
             pvk_encr = 2;
             break;
@@ -249,17 +255,15 @@ int rsa_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
-    private = text || (!pubout && !noout) ? 1 : 0;
+    if (argc != 0)
+        goto opthelp;
+
+    private = (text && !pubin) || (!pubout && !noout) ? 1 : 0;
 
     if (!app_passwd(passinarg, passoutarg, &passin, &passout)) {
         BIO_printf(bio_err, "Error getting passwords\n");
         goto end;
     }
-
-    if (!app_load_modules(NULL))
-        goto end;
-
     if (check && pubin) {
         BIO_printf(bio_err, "Only private keys can be checked\n");
         goto end;
@@ -297,7 +301,7 @@ int rsa_main(int argc, char **argv)
         goto end;
 
     if (text) {
-        assert(private);
+        assert(pubin || private);
         if (!RSA_print(out, rsa, 0)) {
             perror(outfile);
             ERR_print_errors(bio_err);
@@ -306,8 +310,10 @@ int rsa_main(int argc, char **argv)
     }
 
     if (modulus) {
+        BIGNUM *n;
+        RSA_get0_key(rsa, &n, NULL, NULL);
         BIO_printf(out, "Modulus=");
-        BN_print(out, rsa->n);
+        BN_print(out, n);
         BIO_printf(out, "\n");
     }
 
@@ -368,11 +374,17 @@ int rsa_main(int argc, char **argv)
         EVP_PKEY *pk;
         pk = EVP_PKEY_new();
         EVP_PKEY_set1_RSA(pk, rsa);
-        if (outformat == FORMAT_PVK)
+        if (outformat == FORMAT_PVK) {
+            if (pubin) {
+                BIO_printf(bio_err, "PVK form impossible with public key input\n");
+                EVP_PKEY_free(pk);
+                goto end;
+            }
+            assert(private);
             i = i2b_PVK_bio(out, pk, pvk_encr, 0, passout);
-        else if (pubin || pubout)
+        } else if (pubin || pubout) {
             i = i2b_PublicKey_bio(out, pk);
-        else {
+        } else {
             assert(private);
             i = i2b_PrivateKey_bio(out, pk);
         }
@@ -394,10 +406,4 @@ int rsa_main(int argc, char **argv)
     OPENSSL_free(passout);
     return (ret);
 }
-#else                           /* !OPENSSL_NO_RSA */
-
-# if PEDANTIC
-static void *dummy = &dummy;
-# endif
-
 #endif

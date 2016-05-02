@@ -1,4 +1,3 @@
-/* v3_ocsp.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -234,10 +233,13 @@ static void *d2i_ocsp_nonce(void *a, const unsigned char **pp, long length)
 {
     ASN1_OCTET_STRING *os, **pos;
     pos = a;
-    if (!pos || !*pos)
+    if (pos == NULL || *pos == NULL) {
         os = ASN1_OCTET_STRING_new();
-    else
+        if (os == NULL)
+            goto err;
+    } else {
         os = *pos;
+    }
     if (!ASN1_OCTET_STRING_set(os, *pp, length))
         goto err;
 

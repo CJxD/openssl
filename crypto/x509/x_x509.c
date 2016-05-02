@@ -1,4 +1,3 @@
-/* crypto/x509/x_x509.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -66,7 +65,7 @@
 
 ASN1_SEQUENCE_enc(X509_CINF, enc, 0) = {
         ASN1_EXP_OPT(X509_CINF, version, ASN1_INTEGER, 0),
-        ASN1_SIMPLE(X509_CINF, serialNumber, ASN1_INTEGER),
+        ASN1_EMBED(X509_CINF, serialNumber, ASN1_INTEGER),
         ASN1_EMBED(X509_CINF, signature, X509_ALGOR),
         ASN1_SIMPLE(X509_CINF, issuer, X509_NAME),
         ASN1_EMBED(X509_CINF, validity, X509_VAL),
@@ -90,8 +89,6 @@ static int x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
     switch (operation) {
 
     case ASN1_OP_NEW_POST:
-        ret->valid = 0;
-        ret->name = NULL;
         ret->ex_flags = 0;
         ret->ex_pathlen = -1;
         ret->skid = NULL;
@@ -102,12 +99,8 @@ static int x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
 #endif
         ret->aux = NULL;
         ret->crldp = NULL;
-        CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509, ret, &ret->ex_data);
-        break;
-
-    case ASN1_OP_D2I_POST:
-        OPENSSL_free(ret->name);
-        ret->name = X509_NAME_oneline(ret->cert_info.subject, NULL, 0);
+        if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509, ret, &ret->ex_data))
+            return 0;
         break;
 
     case ASN1_OP_FREE_POST:
@@ -123,7 +116,6 @@ static int x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
         sk_IPAddressFamily_pop_free(ret->rfc3779_addr, IPAddressFamily_free);
         ASIdentifiers_free(ret->rfc3779_asid);
 #endif
-        OPENSSL_free(ret->name);
         break;
 
     }
@@ -132,22 +124,15 @@ static int x509_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
 
 }
 
-ASN1_SEQUENCE_ref(X509, x509_cb, CRYPTO_LOCK_X509) = {
+ASN1_SEQUENCE_ref(X509, x509_cb) = {
         ASN1_EMBED(X509, cert_info, X509_CINF),
         ASN1_EMBED(X509, sig_alg, X509_ALGOR),
-        ASN1_SIMPLE(X509, signature, ASN1_BIT_STRING)
+        ASN1_EMBED(X509, signature, ASN1_BIT_STRING)
 } ASN1_SEQUENCE_END_ref(X509, X509)
 
 IMPLEMENT_ASN1_FUNCTIONS(X509)
 
 IMPLEMENT_ASN1_DUP_FUNCTION(X509)
-
-int X509_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                          CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_X509, argl, argp,
-                                   new_func, dup_func, free_func);
-}
 
 int X509_set_ex_data(X509 *r, int idx, void *arg)
 {
@@ -175,12 +160,11 @@ X509 *d2i_X509_AUX(X509 **a, const unsigned char **pp, long length)
     /* Save start position */
     q = *pp;
 
-    if (!a || *a == NULL) {
+    if (a == NULL || *a == NULL)
         freeret = 1;
-    }
     ret = d2i_X509(a, &q, length);
     /* If certificate unreadable then forget it */
-    if (!ret)
+    if (ret == NULL)
         return NULL;
     /* update length */
     length -= q - *pp;
@@ -199,10 +183,20 @@ X509 *d2i_X509_AUX(X509 **a, const unsigned char **pp, long length)
 
 int i2d_X509_AUX(X509 *a, unsigned char **pp)
 {
-    int length;
+    int length, tmplen;
+    unsigned char *start = pp != NULL ? *pp : NULL;
     length = i2d_X509(a, pp);
-    if (a)
-        length += i2d_X509_CERT_AUX(a->aux, pp);
+    if (length < 0 || a == NULL)
+        return length;
+
+    tmplen = i2d_X509_CERT_AUX(a->aux, pp);
+    if (tmplen < 0) {
+        if (start != NULL)
+            *pp = start;
+        return tmplen;
+    }
+    length += tmplen;
+
     return length;
 }
 
@@ -215,7 +209,7 @@ int i2d_re_X509_tbs(X509 *x, unsigned char **pp)
 void X509_get0_signature(ASN1_BIT_STRING **psig, X509_ALGOR **palg, X509 *x)
 {
     if (psig)
-        *psig = x->signature;
+        *psig = &x->signature;
     if (palg)
         *palg = &x->sig_alg;
 }

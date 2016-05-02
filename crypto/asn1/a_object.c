@@ -1,4 +1,3 @@
-/* crypto/asn1/a_object.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -139,9 +138,9 @@ int a2d_ASN1_OBJECT(unsigned char *out, int olen, const char *buf, int num)
             }
             if (!use_bn && l >= ((ULONG_MAX - 80) / 10L)) {
                 use_bn = 1;
-                if (!bl)
+                if (bl == NULL)
                     bl = BN_new();
-                if (!bl || !BN_set_word(bl, l))
+                if (bl == NULL || !BN_set_word(bl, l))
                     goto err;
             }
             if (use_bn) {
@@ -173,7 +172,7 @@ int a2d_ASN1_OBJECT(unsigned char *out, int olen, const char *buf, int num)
                     OPENSSL_free(tmp);
                 tmpsize = blsize + 32;
                 tmp = OPENSSL_malloc(tmpsize);
-                if (!tmp)
+                if (tmp == NULL)
                     goto err;
             }
             while (blsize--)
@@ -225,7 +224,7 @@ int i2a_ASN1_OBJECT(BIO *bp, ASN1_OBJECT *a)
     i = i2t_ASN1_OBJECT(buf, sizeof buf, a);
     if (i > (int)(sizeof(buf) - 1)) {
         p = OPENSSL_malloc(i + 1);
-        if (!p)
+        if (p == NULL)
             return -1;
         i2t_ASN1_OBJECT(p, i + 1, a);
     }

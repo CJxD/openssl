@@ -51,13 +51,6 @@
 #include "modes_lcl.h"
 #include <string.h>
 
-#ifndef MODES_DEBUG
-# ifndef NDEBUG
-#  define NDEBUG
-# endif
-#endif
-#include <assert.h>
-
 #if defined(BSWAP4) && defined(STRICT_ALIGNMENT)
 /* redefine, because alignment is ensured */
 # undef  GETU32
@@ -1701,7 +1694,7 @@ GCM128_CONTEXT *CRYPTO_gcm128_new(void *key, block128_f block)
 {
     GCM128_CONTEXT *ret;
 
-    if ((ret = OPENSSL_malloc(sizeof(*ret))))
+    if ((ret = OPENSSL_malloc(sizeof(*ret))) != NULL)
         CRYPTO_gcm128_init(ret, key, block);
 
     return ret;

@@ -1,4 +1,3 @@
-/* crypto/aes/aes_core.c -*- mode:C; c-file-style: "eay" -*- */
 /**
  * rijndael-alg-fst.c
  *
@@ -28,11 +27,6 @@
 /* Note: rewritten a little bit to provide error control and an OpenSSL-
    compatible API */
 
-#ifndef AES_DEBUG
-# ifndef NDEBUG
-#  define NDEBUG
-# endif
-#endif
 #include <assert.h>
 
 #include <stdlib.h>

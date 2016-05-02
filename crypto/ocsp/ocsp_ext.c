@@ -1,11 +1,10 @@
-/* ocsp_ext.c */
 /*
  * Written by Tom Titchener <Tom_Titchener@groove.net> for the OpenSSL
  * project.
  */
 
 /*
- * History: This file was transfered to Richard Levitte from CertCo by Kathy
+ * History: This file was transferred to Richard Levitte from CertCo by Kathy
  * Weinhold in mid-spring 2000 to be included in OpenSSL or released as a
  * patch kit.
  */
@@ -79,53 +78,53 @@
 
 int OCSP_REQUEST_get_ext_count(OCSP_REQUEST *x)
 {
-    return (X509v3_get_ext_count(x->tbsRequest->requestExtensions));
+    return (X509v3_get_ext_count(x->tbsRequest.requestExtensions));
 }
 
 int OCSP_REQUEST_get_ext_by_NID(OCSP_REQUEST *x, int nid, int lastpos)
 {
     return (X509v3_get_ext_by_NID
-            (x->tbsRequest->requestExtensions, nid, lastpos));
+            (x->tbsRequest.requestExtensions, nid, lastpos));
 }
 
 int OCSP_REQUEST_get_ext_by_OBJ(OCSP_REQUEST *x, ASN1_OBJECT *obj,
                                 int lastpos)
 {
     return (X509v3_get_ext_by_OBJ
-            (x->tbsRequest->requestExtensions, obj, lastpos));
+            (x->tbsRequest.requestExtensions, obj, lastpos));
 }
 
 int OCSP_REQUEST_get_ext_by_critical(OCSP_REQUEST *x, int crit, int lastpos)
 {
     return (X509v3_get_ext_by_critical
-            (x->tbsRequest->requestExtensions, crit, lastpos));
+            (x->tbsRequest.requestExtensions, crit, lastpos));
 }
 
 X509_EXTENSION *OCSP_REQUEST_get_ext(OCSP_REQUEST *x, int loc)
 {
-    return (X509v3_get_ext(x->tbsRequest->requestExtensions, loc));
+    return (X509v3_get_ext(x->tbsRequest.requestExtensions, loc));
 }
 
 X509_EXTENSION *OCSP_REQUEST_delete_ext(OCSP_REQUEST *x, int loc)
 {
-    return (X509v3_delete_ext(x->tbsRequest->requestExtensions, loc));
+    return (X509v3_delete_ext(x->tbsRequest.requestExtensions, loc));
 }
 
 void *OCSP_REQUEST_get1_ext_d2i(OCSP_REQUEST *x, int nid, int *crit, int *idx)
 {
-    return X509V3_get_d2i(x->tbsRequest->requestExtensions, nid, crit, idx);
+    return X509V3_get_d2i(x->tbsRequest.requestExtensions, nid, crit, idx);
 }
 
 int OCSP_REQUEST_add1_ext_i2d(OCSP_REQUEST *x, int nid, void *value, int crit,
                               unsigned long flags)
 {
-    return X509V3_add1_i2d(&x->tbsRequest->requestExtensions, nid, value,
+    return X509V3_add1_i2d(&x->tbsRequest.requestExtensions, nid, value,
                            crit, flags);
 }
 
 int OCSP_REQUEST_add_ext(OCSP_REQUEST *x, X509_EXTENSION *ex, int loc)
 {
-    return (X509v3_add_ext(&(x->tbsRequest->requestExtensions), ex, loc) !=
+    return (X509v3_add_ext(&(x->tbsRequest.requestExtensions), ex, loc) !=
             NULL);
 }
 
@@ -183,56 +182,56 @@ int OCSP_ONEREQ_add_ext(OCSP_ONEREQ *x, X509_EXTENSION *ex, int loc)
 
 int OCSP_BASICRESP_get_ext_count(OCSP_BASICRESP *x)
 {
-    return (X509v3_get_ext_count(x->tbsResponseData->responseExtensions));
+    return (X509v3_get_ext_count(x->tbsResponseData.responseExtensions));
 }
 
 int OCSP_BASICRESP_get_ext_by_NID(OCSP_BASICRESP *x, int nid, int lastpos)
 {
     return (X509v3_get_ext_by_NID
-            (x->tbsResponseData->responseExtensions, nid, lastpos));
+            (x->tbsResponseData.responseExtensions, nid, lastpos));
 }
 
 int OCSP_BASICRESP_get_ext_by_OBJ(OCSP_BASICRESP *x, ASN1_OBJECT *obj,
                                   int lastpos)
 {
     return (X509v3_get_ext_by_OBJ
-            (x->tbsResponseData->responseExtensions, obj, lastpos));
+            (x->tbsResponseData.responseExtensions, obj, lastpos));
 }
 
 int OCSP_BASICRESP_get_ext_by_critical(OCSP_BASICRESP *x, int crit,
                                        int lastpos)
 {
     return (X509v3_get_ext_by_critical
-            (x->tbsResponseData->responseExtensions, crit, lastpos));
+            (x->tbsResponseData.responseExtensions, crit, lastpos));
 }
 
 X509_EXTENSION *OCSP_BASICRESP_get_ext(OCSP_BASICRESP *x, int loc)
 {
-    return (X509v3_get_ext(x->tbsResponseData->responseExtensions, loc));
+    return (X509v3_get_ext(x->tbsResponseData.responseExtensions, loc));
 }
 
 X509_EXTENSION *OCSP_BASICRESP_delete_ext(OCSP_BASICRESP *x, int loc)
 {
-    return (X509v3_delete_ext(x->tbsResponseData->responseExtensions, loc));
+    return (X509v3_delete_ext(x->tbsResponseData.responseExtensions, loc));
 }
 
 void *OCSP_BASICRESP_get1_ext_d2i(OCSP_BASICRESP *x, int nid, int *crit,
                                   int *idx)
 {
-    return X509V3_get_d2i(x->tbsResponseData->responseExtensions, nid, crit,
+    return X509V3_get_d2i(x->tbsResponseData.responseExtensions, nid, crit,
                           idx);
 }
 
 int OCSP_BASICRESP_add1_ext_i2d(OCSP_BASICRESP *x, int nid, void *value,
                                 int crit, unsigned long flags)
 {
-    return X509V3_add1_i2d(&x->tbsResponseData->responseExtensions, nid,
+    return X509V3_add1_i2d(&x->tbsResponseData.responseExtensions, nid,
                            value, crit, flags);
 }
 
 int OCSP_BASICRESP_add_ext(OCSP_BASICRESP *x, X509_EXTENSION *ex, int loc)
 {
-    return (X509v3_add_ext(&(x->tbsResponseData->responseExtensions), ex, loc)
+    return (X509v3_add_ext(&(x->tbsResponseData.responseExtensions), ex, loc)
             != NULL);
 }
 
@@ -292,7 +291,7 @@ int OCSP_SINGLERESP_add_ext(OCSP_SINGLERESP *x, X509_EXTENSION *ex, int loc)
 /* Nonce handling functions */
 
 /*
- * Add a nonce to an extension stack. A nonce can be specificed or if NULL a
+ * Add a nonce to an extension stack. A nonce can be specified or if NULL a
  * random nonce will be generated. Note: OpenSSL 0.9.7d and later create an
  * OCTET STRING containing the nonce, previous versions used the raw nonce.
  */
@@ -334,14 +333,14 @@ static int ocsp_add1_nonce(STACK_OF(X509_EXTENSION) **exts,
 
 int OCSP_request_add1_nonce(OCSP_REQUEST *req, unsigned char *val, int len)
 {
-    return ocsp_add1_nonce(&req->tbsRequest->requestExtensions, val, len);
+    return ocsp_add1_nonce(&req->tbsRequest.requestExtensions, val, len);
 }
 
 /* Same as above but for a response */
 
 int OCSP_basic_add1_nonce(OCSP_BASICRESP *resp, unsigned char *val, int len)
 {
-    return ocsp_add1_nonce(&resp->tbsResponseData->responseExtensions, val,
+    return ocsp_add1_nonce(&resp->tbsResponseData.responseExtensions, val,
                            len);
 }
 
@@ -510,12 +509,16 @@ X509_EXTENSION *OCSP_url_svcloc_new(X509_NAME *issuer, char **urls)
             goto err;
         ad->location->type = GEN_URI;
         ad->location->d.ia5 = ia5;
+        ia5 = NULL;
         if (!sk_ACCESS_DESCRIPTION_push(sloc->locator, ad))
             goto err;
+        ad = NULL;
         urls++;
     }
     x = X509V3_EXT_i2d(NID_id_pkix_OCSP_serviceLocator, 0, sloc);
  err:
+    ASN1_IA5STRING_free(ia5);
+    ACCESS_DESCRIPTION_free(ad);
     OCSP_SERVICELOC_free(sloc);
     return x;
 }

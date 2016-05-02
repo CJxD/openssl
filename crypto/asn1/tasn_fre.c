@@ -1,4 +1,3 @@
-/* tasn_fre.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -125,8 +124,10 @@ static void asn1_item_embed_free(ASN1_VALUE **pval, const ASN1_ITEM *it,
         }
         if (asn1_cb)
             asn1_cb(ASN1_OP_FREE_POST, pval, it, NULL);
-        OPENSSL_free(*pval);
-        *pval = NULL;
+        if (embed == 0) {
+            OPENSSL_free(*pval);
+            *pval = NULL;
+        }
         break;
 
     case ASN1_ITYPE_EXTERN:

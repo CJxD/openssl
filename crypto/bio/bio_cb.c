@@ -1,4 +1,3 @@
-/* crypto/bio/bio_cb.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,8 +58,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "bio_lcl.h"
 #include "internal/cryptlib.h"
-#include <openssl/bio.h>
 #include <openssl/err.h>
 
 long BIO_debug_callback(BIO *bio, int cmd, const char *argp,
@@ -78,6 +77,9 @@ long BIO_debug_callback(BIO *bio, int cmd, const char *argp,
 
     len = BIO_snprintf(buf,sizeof buf,"BIO[%p]: ",(void *)bio);
 
+    /* Ignore errors and continue printing the other information. */
+    if (len < 0)
+        len = 0;
     p = buf + len;
     p_maxlen = sizeof(buf) - len;
 

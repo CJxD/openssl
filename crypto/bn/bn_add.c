@@ -1,4 +1,3 @@
-/* crypto/bn/bn_add.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -222,7 +221,7 @@ int BN_usub(BIGNUM *r, const BIGNUM *a, const BIGNUM *b)
                 break;
         }
     }
-    if (dif)
+    if (dif && ap != rp)
         memcpy(rp, ap, sizeof(*rp) * dif);
 
     r->top = max;

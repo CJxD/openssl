@@ -59,6 +59,7 @@
 # include <openssl/objects.h>
 # include <openssl/rc4.h>
 # include <openssl/md5.h>
+# include "internal/evp_int.h"
 
 # ifndef EVP_CIPH_FLAG_AEAD_CIPHER
 #  define EVP_CIPH_FLAG_AEAD_CIPHER       0x200000
@@ -80,7 +81,7 @@ typedef struct {
 void rc4_md5_enc(RC4_KEY *key, const void *in0, void *out,
                  MD5_CTX *ctx, const void *inp, size_t blocks);
 
-# define data(ctx) ((EVP_RC4_HMAC_MD5 *)(ctx)->cipher_data)
+# define data(ctx) ((EVP_RC4_HMAC_MD5 *)EVP_CIPHER_CTX_get_cipher_data(ctx))
 
 static int rc4_hmac_md5_init_key(EVP_CIPHER_CTX *ctx,
                                  const unsigned char *inkey,
@@ -101,8 +102,7 @@ static int rc4_hmac_md5_init_key(EVP_CIPHER_CTX *ctx,
 
 # if     !defined(OPENSSL_NO_ASM) &&     ( \
         defined(__x86_64)       || defined(__x86_64__)  || \
-        defined(_M_AMD64)       || defined(_M_X64)      || \
-        defined(__INTEL__)              )
+        defined(_M_AMD64)       || defined(_M_X64)      )
 #  define STITCHED_CALL
 # endif
 
@@ -127,7 +127,7 @@ static int rc4_hmac_md5_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
     if (plen != NO_PAYLOAD_LENGTH && len != (plen + MD5_DIGEST_LENGTH))
         return 0;
 
-    if (ctx->encrypt) {
+    if (EVP_CIPHER_CTX_encrypting(ctx)) {
         if (plen == NO_PAYLOAD_LENGTH)
             plen = len;
 # if defined(STITCHED_CALL)
@@ -265,7 +265,7 @@ static int rc4_hmac_md5_ctrl(EVP_CIPHER_CTX *ctx, int type, int arg,
 
             len = p[arg - 2] << 8 | p[arg - 1];
 
-            if (!ctx->encrypt) {
+            if (!EVP_CIPHER_CTX_encrypting(ctx)) {
                 len -= MD5_DIGEST_LENGTH;
                 p[arg - 2] = len >> 8;
                 p[arg - 1] = len;

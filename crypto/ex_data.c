@@ -108,60 +108,74 @@
  *
  */
 
-#include "internal/cryptlib.h"
+#include "internal/cryptlib_int.h"
+#include "internal/threads.h"
 #include <openssl/lhash.h>
 
-
-typedef struct {
-    long argl;                  /* Arbitary long */
-    void *argp;                 /* Arbitary void * */
+/*
+ * Each structure type (sometimes called a class), that supports
+ * exdata has a stack of callbacks for each instance.
+ */
+struct ex_callback_st {
+    long argl;                  /* Arbitrary long */
+    void *argp;                 /* Arbitrary void * */
     CRYPTO_EX_new *new_func;
     CRYPTO_EX_free *free_func;
     CRYPTO_EX_dup *dup_func;
-} CRYPTO_EX_DATA_FUNCS;
-
-DECLARE_STACK_OF(CRYPTO_EX_DATA_FUNCS)
+};
 
 /*
- * State for each class; could just be a typedef, but this allows future
- * changes.
+ * The state for each class.  This could just be a typedef, but
+ * a structure allows future changes.
  */
-typedef struct {
-    STACK_OF(CRYPTO_EX_DATA_FUNCS) *meth;
-} EX_CLASS_ITEM;
+typedef struct ex_callbacks_st {
+    STACK_OF(EX_CALLBACK) *meth;
+} EX_CALLBACKS;
 
-static EX_CLASS_ITEM ex_data[CRYPTO_EX_INDEX__COUNT];
+static EX_CALLBACKS ex_data[CRYPTO_EX_INDEX__COUNT];
+
+static CRYPTO_RWLOCK *ex_data_lock = NULL;
+static CRYPTO_ONCE ex_data_init = CRYPTO_ONCE_STATIC_INIT;
+
+static void do_ex_data_init(void)
+{
+    ex_data_lock = CRYPTO_THREAD_lock_new();
+}
 
 /*
- * Return the EX_CLASS_ITEM from the "ex_data" array that corresponds to
+ * Return the EX_CALLBACKS from the |ex_data| array that corresponds to
  * a given class.  On success, *holds the lock.*
  */
-static EX_CLASS_ITEM *def_get_class(int class_index)
+static EX_CALLBACKS *get_and_lock(int class_index)
 {
-    EX_CLASS_ITEM *ip;
+    EX_CALLBACKS *ip;
 
     if (class_index < 0 || class_index >= CRYPTO_EX_INDEX__COUNT) {
-        CRYPTOerr(CRYPTO_F_DEF_GET_CLASS, ERR_R_MALLOC_FAILURE);
+        CRYPTOerr(CRYPTO_F_GET_AND_LOCK, ERR_R_PASSED_INVALID_ARGUMENT);
         return NULL;
     }
 
-    ip = &ex_data[class_index];
-    CRYPTO_w_lock(CRYPTO_LOCK_EX_DATA);
-    if (ip->meth == NULL) {
-        ip->meth = sk_CRYPTO_EX_DATA_FUNCS_new_null();
-        /* We push an initial value on the stack because the SSL
-         * "app_data" routines use ex_data index zero.  See RT 3710. */
-        if (ip->meth == NULL
-            || !sk_CRYPTO_EX_DATA_FUNCS_push(ip->meth, NULL)) {
-            CRYPTOerr(CRYPTO_F_DEF_GET_CLASS, ERR_R_MALLOC_FAILURE);
-            CRYPTO_w_unlock(CRYPTO_LOCK_EX_DATA);
-            return NULL;
-        }
+    CRYPTO_THREAD_run_once(&ex_data_init, do_ex_data_init);
+
+    if (ex_data_lock == NULL) {
+        /*
+         * This can happen in normal operation when using CRYPTO_mem_leaks().
+         * The CRYPTO_mem_leaks() function calls OPENSSL_cleanup() which cleans
+         * up the locks. Subsequently the BIO that CRYPTO_mem_leaks() uses gets
+         * freed, which also attempts to free the ex_data. However
+         * CRYPTO_mem_leaks() ensures that the ex_data is freed early (i.e.
+         * before OPENSSL_cleanup() is called), so if we get here we can safely
+         * ignore this operation. We just treat it as an error.
+         */
+         return NULL;
     }
+
+    ip = &ex_data[class_index];
+    CRYPTO_THREAD_write_lock(ex_data_lock);
     return ip;
 }
 
-static void cleanup_cb(CRYPTO_EX_DATA_FUNCS *funcs)
+static void cleanup_cb(EX_CALLBACK *funcs)
 {
     OPENSSL_free(funcs);
 }
@@ -172,33 +186,92 @@ static void cleanup_cb(CRYPTO_EX_DATA_FUNCS *funcs)
  * called under potential race-conditions anyway (it's for program shutdown
  * after all).
  */
-void CRYPTO_cleanup_all_ex_data(void)
+void crypto_cleanup_all_ex_data_int(void)
 {
     int i;
 
     for (i = 0; i < CRYPTO_EX_INDEX__COUNT; ++i) {
-        EX_CLASS_ITEM *ip = &ex_data[i];
+        EX_CALLBACKS *ip = &ex_data[i];
 
-        sk_CRYPTO_EX_DATA_FUNCS_pop_free(ip->meth, cleanup_cb);
+        sk_EX_CALLBACK_pop_free(ip->meth, cleanup_cb);
         ip->meth = NULL;
     }
+
+    CRYPTO_THREAD_lock_free(ex_data_lock);
+    ex_data_lock = NULL;
+}
+
+
+/*
+ * Unregister a new index by replacing the callbacks with no-ops.
+ * Any in-use instances are leaked.
+ */
+static void dummy_new(void *parent, void *ptr, CRYPTO_EX_DATA *ad, int idx,
+                     long argl, void *argp)
+{
+}
+
+static void dummy_free(void *parent, void *ptr, CRYPTO_EX_DATA *ad, int idx,
+                       long argl, void *argp)
+{
+}
+
+static int dummy_dup(CRYPTO_EX_DATA *to, CRYPTO_EX_DATA *from,
+                     void *from_d, int idx,
+                     long argl, void *argp)
+{
+    return 0;
+}
+
+int CRYPTO_free_ex_index(int class_index, int idx)
+{
+    EX_CALLBACKS *ip = get_and_lock(class_index);
+    EX_CALLBACK *a;
+    int toret = 0;
+
+    if (ip == NULL)
+        return 0;
+    if (idx < 0 || idx >= sk_EX_CALLBACK_num(ip->meth))
+        goto err;
+    a = sk_EX_CALLBACK_value(ip->meth, idx);
+    if (a == NULL)
+        goto err;
+    a->new_func = dummy_new;
+    a->dup_func = dummy_dup;
+    a->free_func = dummy_free;
+    toret = 1;
+err:
+    CRYPTO_THREAD_unlock(ex_data_lock);
+    return toret;
 }
 
 /*
- * Inside an existing class, get/register a new index.
+ * Register a new index.
  */
 int CRYPTO_get_ex_new_index(int class_index, long argl, void *argp,
                             CRYPTO_EX_new *new_func, CRYPTO_EX_dup *dup_func,
                             CRYPTO_EX_free *free_func)
 {
     int toret = -1;
-    CRYPTO_EX_DATA_FUNCS *a;
-    EX_CLASS_ITEM *ip = def_get_class(class_index);
+    EX_CALLBACK *a;
+    EX_CALLBACKS *ip = get_and_lock(class_index);
 
-    if (!ip)
+    if (ip == NULL)
         return -1;
-    a = (CRYPTO_EX_DATA_FUNCS *)OPENSSL_malloc(sizeof(*a));
-    if (!a) {
+
+    if (ip->meth == NULL) {
+        ip->meth = sk_EX_CALLBACK_new_null();
+        /* We push an initial value on the stack because the SSL
+         * "app_data" routines use ex_data index zero.  See RT 3710. */
+        if (ip->meth == NULL
+            || !sk_EX_CALLBACK_push(ip->meth, NULL)) {
+            CRYPTOerr(CRYPTO_F_CRYPTO_GET_EX_NEW_INDEX, ERR_R_MALLOC_FAILURE);
+            goto err;
+        }
+    }
+
+    a = (EX_CALLBACK *)OPENSSL_malloc(sizeof(*a));
+    if (a == NULL) {
         CRYPTOerr(CRYPTO_F_CRYPTO_GET_EX_NEW_INDEX, ERR_R_MALLOC_FAILURE);
         goto err;
     }
@@ -208,23 +281,23 @@ int CRYPTO_get_ex_new_index(int class_index, long argl, void *argp,
     a->dup_func = dup_func;
     a->free_func = free_func;
 
-    if (!sk_CRYPTO_EX_DATA_FUNCS_push(ip->meth, NULL)) {
+    if (!sk_EX_CALLBACK_push(ip->meth, NULL)) {
         CRYPTOerr(CRYPTO_F_CRYPTO_GET_EX_NEW_INDEX, ERR_R_MALLOC_FAILURE);
         OPENSSL_free(a);
         goto err;
     }
-    toret = sk_CRYPTO_EX_DATA_FUNCS_num(ip->meth) - 1;
-    (void)sk_CRYPTO_EX_DATA_FUNCS_set(ip->meth, toret, a);
+    toret = sk_EX_CALLBACK_num(ip->meth) - 1;
+    (void)sk_EX_CALLBACK_set(ip->meth, toret, a);
 
  err:
-    CRYPTO_w_unlock(CRYPTO_LOCK_EX_DATA);
+    CRYPTO_THREAD_unlock(ex_data_lock);
     return toret;
 }
 
 /*
  * Initialise a new CRYPTO_EX_DATA for use in a particular class - including
  * calling new() callbacks for each index in the class used by this variable
- * Thread-safe by copying a class's array of "CRYPTO_EX_DATA_FUNCS" entries
+ * Thread-safe by copying a class's array of "EX_CALLBACK" entries
  * in the lock, then using them outside the lock. Note this only applies
  * to the global "ex_data" state (ie. class definitions), not 'ad' itself.
  */
@@ -232,26 +305,26 @@ int CRYPTO_new_ex_data(int class_index, void *obj, CRYPTO_EX_DATA *ad)
 {
     int mx, i;
     void *ptr;
-    CRYPTO_EX_DATA_FUNCS **storage = NULL;
-    CRYPTO_EX_DATA_FUNCS *stack[10];
-    EX_CLASS_ITEM *ip = def_get_class(class_index);
+    EX_CALLBACK **storage = NULL;
+    EX_CALLBACK *stack[10];
+    EX_CALLBACKS *ip = get_and_lock(class_index);
 
-    if (!ip)
+    if (ip == NULL)
         return 0;
 
     ad->sk = NULL;
 
-    mx = sk_CRYPTO_EX_DATA_FUNCS_num(ip->meth);
+    mx = sk_EX_CALLBACK_num(ip->meth);
     if (mx > 0) {
         if (mx < (int)OSSL_NELEM(stack))
             storage = stack;
         else
             storage = OPENSSL_malloc(sizeof(*storage) * mx);
-        if (storage)
+        if (storage != NULL)
             for (i = 0; i < mx; i++)
-                storage[i] = sk_CRYPTO_EX_DATA_FUNCS_value(ip->meth, i);
+                storage[i] = sk_EX_CALLBACK_value(ip->meth, i);
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_EX_DATA);
+    CRYPTO_THREAD_unlock(ex_data_lock);
 
     if (mx > 0 && storage == NULL) {
         CRYPTOerr(CRYPTO_F_CRYPTO_NEW_EX_DATA, ERR_R_MALLOC_FAILURE);
@@ -278,17 +351,17 @@ int CRYPTO_dup_ex_data(int class_index, CRYPTO_EX_DATA *to,
 {
     int mx, j, i;
     char *ptr;
-    CRYPTO_EX_DATA_FUNCS *stack[10];
-    CRYPTO_EX_DATA_FUNCS **storage = NULL;
-    EX_CLASS_ITEM *ip;
+    EX_CALLBACK *stack[10];
+    EX_CALLBACK **storage = NULL;
+    EX_CALLBACKS *ip;
 
     if (from->sk == NULL)
         /* Nothing to copy over */
         return 1;
-    if ((ip = def_get_class(class_index)) == NULL)
+    if ((ip = get_and_lock(class_index)) == NULL)
         return 0;
 
-    mx = sk_CRYPTO_EX_DATA_FUNCS_num(ip->meth);
+    mx = sk_EX_CALLBACK_num(ip->meth);
     j = sk_void_num(from->sk);
     if (j < mx)
         mx = j;
@@ -297,11 +370,11 @@ int CRYPTO_dup_ex_data(int class_index, CRYPTO_EX_DATA *to,
             storage = stack;
         else
             storage = OPENSSL_malloc(sizeof(*storage) * mx);
-        if (storage)
+        if (storage != NULL)
             for (i = 0; i < mx; i++)
-                storage[i] = sk_CRYPTO_EX_DATA_FUNCS_value(ip->meth, i);
+                storage[i] = sk_EX_CALLBACK_value(ip->meth, i);
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_EX_DATA);
+    CRYPTO_THREAD_unlock(ex_data_lock);
 
     if (mx > 0 && storage == NULL) {
         CRYPTOerr(CRYPTO_F_CRYPTO_DUP_EX_DATA, ERR_R_MALLOC_FAILURE);
@@ -328,25 +401,25 @@ int CRYPTO_dup_ex_data(int class_index, CRYPTO_EX_DATA *to,
 void CRYPTO_free_ex_data(int class_index, void *obj, CRYPTO_EX_DATA *ad)
 {
     int mx, i;
-    EX_CLASS_ITEM *ip;
+    EX_CALLBACKS *ip;
     void *ptr;
-    CRYPTO_EX_DATA_FUNCS *stack[10];
-    CRYPTO_EX_DATA_FUNCS **storage = NULL;
+    EX_CALLBACK *stack[10];
+    EX_CALLBACK **storage = NULL;
 
-    if ((ip = def_get_class(class_index)) == NULL)
+    if ((ip = get_and_lock(class_index)) == NULL)
         return;
 
-    mx = sk_CRYPTO_EX_DATA_FUNCS_num(ip->meth);
+    mx = sk_EX_CALLBACK_num(ip->meth);
     if (mx > 0) {
         if (mx < (int)OSSL_NELEM(stack))
             storage = stack;
         else
             storage = OPENSSL_malloc(sizeof(*storage) * mx);
-        if (storage)
+        if (storage != NULL)
             for (i = 0; i < mx; i++)
-                storage[i] = sk_CRYPTO_EX_DATA_FUNCS_value(ip->meth, i);
+                storage[i] = sk_EX_CALLBACK_value(ip->meth, i);
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_EX_DATA);
+    CRYPTO_THREAD_unlock(ex_data_lock);
 
     if (mx > 0 && storage == NULL) {
         CRYPTOerr(CRYPTO_F_CRYPTO_FREE_EX_DATA, ERR_R_MALLOC_FAILURE);

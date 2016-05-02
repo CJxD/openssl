@@ -1,4 +1,3 @@
-/* v3_purp.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2001.
@@ -129,10 +128,11 @@ int X509_check_purpose(X509 *x, int id, int ca)
     int idx;
     const X509_PURPOSE *pt;
     if (!(x->ex_flags & EXFLAG_SET)) {
-        CRYPTO_w_lock(CRYPTO_LOCK_X509);
+        CRYPTO_THREAD_write_lock(x->lock);
         x509v3_cache_extensions(x);
-        CRYPTO_w_unlock(CRYPTO_LOCK_X509);
+        CRYPTO_THREAD_unlock(x->lock);
     }
+    /* Return if side-effect only call */
     if (id == -1)
         return 1;
     idx = X509_PURPOSE_get_by_id(id);
@@ -225,8 +225,8 @@ int X509_PURPOSE_add(int id, int trust, int flags,
         OPENSSL_free(ptmp->sname);
     }
     /* dup supplied name */
-    ptmp->name = BUF_strdup(name);
-    ptmp->sname = BUF_strdup(sname);
+    ptmp->name = OPENSSL_strdup(name);
+    ptmp->sname = OPENSSL_strdup(sname);
     if (!ptmp->name || !ptmp->sname) {
         X509V3err(X509V3_F_X509_PURPOSE_ADD, ERR_R_MALLOC_FAILURE);
         return 0;
@@ -380,6 +380,14 @@ static void setup_crldp(X509 *x)
         setup_dp(x, sk_DIST_POINT_value(x->crldp, i));
 }
 
+#define V1_ROOT (EXFLAG_V1|EXFLAG_SS)
+#define ku_reject(x, usage) \
+        (((x)->ex_flags & EXFLAG_KUSAGE) && !((x)->ex_kusage & (usage)))
+#define xku_reject(x, usage) \
+        (((x)->ex_flags & EXFLAG_XKUSAGE) && !((x)->ex_xkusage & (usage)))
+#define ns_reject(x, usage) \
+        (((x)->ex_flags & EXFLAG_NSCERT) && !((x)->ex_nscert & (usage)))
+
 static void x509v3_cache_extensions(X509 *x)
 {
     BASIC_CONSTRAINTS *bs;
@@ -497,7 +505,8 @@ static void x509v3_cache_extensions(X509 *x)
     if (!X509_NAME_cmp(X509_get_subject_name(x), X509_get_issuer_name(x))) {
         x->ex_flags |= EXFLAG_SI;
         /* If SKID matches AKID also indicate self signed */
-        if (X509_check_akid(x, x->akid) == X509_V_OK)
+        if (X509_check_akid(x, x->akid) == X509_V_OK &&
+            !ku_reject(x, KU_KEY_CERT_SIGN))
             x->ex_flags |= EXFLAG_SS;
     }
     x->altname = X509_get_ext_d2i(x, NID_subject_alt_name, NULL, NULL);
@@ -536,14 +545,6 @@ static void x509v3_cache_extensions(X509 *x)
  * 4 basicConstraints absent but keyUsage present and keyCertSign asserted.
  */
 
-#define V1_ROOT (EXFLAG_V1|EXFLAG_SS)
-#define ku_reject(x, usage) \
-        (((x)->ex_flags & EXFLAG_KUSAGE) && !((x)->ex_kusage & (usage)))
-#define xku_reject(x, usage) \
-        (((x)->ex_flags & EXFLAG_XKUSAGE) && !((x)->ex_xkusage & (usage)))
-#define ns_reject(x, usage) \
-        (((x)->ex_flags & EXFLAG_NSCERT) && !((x)->ex_nscert & (usage)))
-
 static int check_ca(const X509 *x)
 {
     /* keyUsage if present should allow cert signing */
@@ -575,9 +576,9 @@ static int check_ca(const X509 *x)
 int X509_check_ca(X509 *x)
 {
     if (!(x->ex_flags & EXFLAG_SET)) {
-        CRYPTO_w_lock(CRYPTO_LOCK_X509);
+        CRYPTO_THREAD_write_lock(x->lock);
         x509v3_cache_extensions(x);
-        CRYPTO_w_unlock(CRYPTO_LOCK_X509);
+        CRYPTO_THREAD_unlock(x->lock);
     }
 
     return check_ca(x);
@@ -850,12 +851,14 @@ int X509_check_akid(X509 *issuer, AUTHORITY_KEYID *akid)
 
 uint32_t X509_get_extension_flags(X509 *x)
 {
+    /* Call for side-effect of computing hash and caching extensions */
     X509_check_purpose(x, -1, -1);
     return x->ex_flags;
 }
 
 uint32_t X509_get_key_usage(X509 *x)
 {
+    /* Call for side-effect of computing hash and caching extensions */
     X509_check_purpose(x, -1, -1);
     if (x->ex_flags & EXFLAG_KUSAGE)
         return x->ex_kusage;
@@ -864,6 +867,7 @@ uint32_t X509_get_key_usage(X509 *x)
 
 uint32_t X509_get_extended_key_usage(X509 *x)
 {
+    /* Call for side-effect of computing hash and caching extensions */
     X509_check_purpose(x, -1, -1);
     if (x->ex_flags & EXFLAG_XKUSAGE)
         return x->ex_xkusage;
@@ -872,6 +876,7 @@ uint32_t X509_get_extended_key_usage(X509 *x)
 
 const ASN1_OCTET_STRING *X509_get0_subject_key_id(X509 *x)
 {
+    /* Call for side-effect of computing hash and caching extensions */
     X509_check_purpose(x, -1, -1);
     return x->skid;
 }

@@ -1,4 +1,3 @@
-/* crypto/rc2/rc2test.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -142,10 +141,6 @@ int main(int argc, char *argv[])
     if (err == 0)
         printf("ecb RC2 ok\n");
 
-# ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-# endif
     EXIT(err);
 }
 

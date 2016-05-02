@@ -58,6 +58,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "apps.h"
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -84,7 +85,7 @@ typedef enum OPTION_choice {
     OPT_E, OPT_IN, OPT_OUT, OPT_PASS, OPT_ENGINE, OPT_D, OPT_P, OPT_V,
     OPT_NOPAD, OPT_SALT, OPT_NOSALT, OPT_DEBUG, OPT_UPPER_P, OPT_UPPER_A,
     OPT_A, OPT_Z, OPT_BUFSIZE, OPT_K, OPT_KFILE, OPT_UPPER_K, OPT_NONE,
-    OPT_UPPER_S, OPT_IV, OPT_MD, OPT_NON_FIPS_ALLOW, OPT_CIPHER
+    OPT_UPPER_S, OPT_IV, OPT_MD, OPT_CIPHER
 } OPTION_CHOICE;
 
 OPTIONS enc_options[] = {
@@ -96,14 +97,15 @@ OPTIONS enc_options[] = {
     {"d", OPT_D, '-', "Decrypt"},
     {"p", OPT_P, '-', "Print the iv/key"},
     {"P", OPT_UPPER_P, '-', "Print the iv/key and exit"},
-    {"v", OPT_V, '-'},
+    {"v", OPT_V, '-', "Verbose output"},
     {"nopad", OPT_NOPAD, '-', "Disable standard block padding"},
-    {"salt", OPT_SALT, '-'},
-    {"nosalt", OPT_NOSALT, '-'},
-    {"debug", OPT_DEBUG, '-'},
-    {"A", OPT_UPPER_A, '-'},
-    {"a", OPT_A, '-', "base64 encode/decode, depending on encryption flag"},
-    {"base64", OPT_A, '-', "Base64 output as a single line"},
+    {"salt", OPT_SALT, '-', "Use salt in the KDF (default)"},
+    {"nosalt", OPT_NOSALT, '-', "Do not use salt in the KDF"},
+    {"debug", OPT_DEBUG, '-', "Print debug info"},
+    {"a", OPT_A, '-', "Base64 encode/decode, depending on encryption flag"},
+    {"base64", OPT_A, '-', "Same as option -a"},
+    {"A", OPT_UPPER_A, '-',
+     "Used with -[base64|a] to specify base64 buffer as a single line"},
     {"bufsize", OPT_BUFSIZE, 's', "Buffer size"},
     {"k", OPT_K, 's', "Passphrase"},
     {"kfile", OPT_KFILE, '<', "Fead passphrase from file"},
@@ -111,7 +113,6 @@ OPTIONS enc_options[] = {
     {"S", OPT_UPPER_S, 's', "Salt, in hex"},
     {"iv", OPT_IV, 's', "IV in hex"},
     {"md", OPT_MD, 's', "Use specified digest to create key from passphrase"},
-    {"non-fips-allow", OPT_NON_FIPS_ALLOW, '-'},
     {"none", OPT_NONE, '-', "Don't encrypt"},
     {"", OPT_CIPHER, '-', "Any supported cipher"},
 #ifdef ZLIB
@@ -140,10 +141,10 @@ int enc_main(int argc, char **argv)
     int bsize = BSIZE, verbose = 0, debug = 0, olb64 = 0, nosalt = 0;
     int enc = 1, printkey = 0, i, k;
     int base64 = 0, informat = FORMAT_BINARY, outformat = FORMAT_BINARY;
-    int ret = 1, inl, nopad = 0, non_fips_allow = 0;
+    int ret = 1, inl, nopad = 0;
     unsigned char key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH];
     unsigned char *buff = NULL, salt[PKCS5_SALT_LEN];
-    unsigned long n;
+    long n;
 #ifdef ZLIB
     int do_zlib = 0;
     BIO *bzl = NULL;
@@ -237,7 +238,8 @@ int enc_main(int argc, char **argv)
             k = i >= 1 && p[i] == 'k';
             if (k)
                 p[i] = '\0';
-            if (!opt_ulong(opt_arg(), &n))
+            if (!opt_long(opt_arg(), &n)
+                    || n < 0 || (k && n >= LONG_MAX / 1024))
                 goto opthelp;
             if (k)
                 n *= 1024;
@@ -279,9 +281,6 @@ int enc_main(int argc, char **argv)
             if (!opt_md(opt_arg(), &dgst))
                 goto opthelp;
             break;
-        case OPT_NON_FIPS_ALLOW:
-            non_fips_allow = 1;
-            break;
         case OPT_CIPHER:
             if (!opt_cipher(opt_unknown(), &c))
                 goto opthelp;
@@ -292,11 +291,6 @@ int enc_main(int argc, char **argv)
             break;
         }
     }
-    argc = opt_num_rest();
-    argv = opt_rest();
-
-    if (!app_load_modules(NULL))
-        goto end;
 
     if (cipher && EVP_CIPHER_flags(cipher) & EVP_CIPH_FLAG_AEAD_CIPHER) {
         BIO_printf(bio_err, "%s: AEAD ciphers not supported\n", prog);
@@ -309,7 +303,7 @@ int enc_main(int argc, char **argv)
     }
 
     if (dgst == NULL)
-        dgst = EVP_md5();
+        dgst = EVP_sha256();
 
     /* It must be large enough for a base64 encoded line */
     if (base64 && bsize < 80)
@@ -317,22 +311,18 @@ int enc_main(int argc, char **argv)
     if (verbose)
         BIO_printf(bio_err, "bufsize=%d\n", bsize);
 
-    if (base64) {
-        if (enc)
-            outformat = FORMAT_BASE64;
-        else
-            informat = FORMAT_BASE64;
-    }
+#ifdef ZLIB
+    if (!do_zlib)
+#endif
+        if (base64) {
+            if (enc)
+                outformat = FORMAT_BASE64;
+            else
+                informat = FORMAT_BASE64;
+        }
 
     strbuf = app_malloc(SIZE, "strbuf");
     buff = app_malloc(EVP_ENCODE_LENGTH(bsize), "evp buffer");
-
-    if (debug) {
-        BIO_set_callback(in, BIO_debug_callback);
-        BIO_set_callback(out, BIO_debug_callback);
-        BIO_set_callback_arg(in, (char *)bio_err);
-        BIO_set_callback_arg(out, (char *)bio_err);
-    }
 
     if (infile == NULL) {
         unbuffer(stdin);
@@ -351,32 +341,46 @@ int enc_main(int argc, char **argv)
     }
 
     if ((str == NULL) && (cipher != NULL) && (hkey == NULL)) {
-        for (;;) {
-            char prompt[200];
+        if (1) {
+#ifndef OPENSSL_NO_UI
+            for (;;) {
+                char prompt[200];
 
-            BIO_snprintf(prompt, sizeof prompt, "enter %s %s password:",
-                         OBJ_nid2ln(EVP_CIPHER_nid(cipher)),
-                         (enc) ? "encryption" : "decryption");
-            strbuf[0] = '\0';
-            i = EVP_read_pw_string((char *)strbuf, SIZE, prompt, enc);
-            if (i == 0) {
-                if (strbuf[0] == '\0') {
-                    ret = 1;
+                BIO_snprintf(prompt, sizeof prompt, "enter %s %s password:",
+                             OBJ_nid2ln(EVP_CIPHER_nid(cipher)),
+                             (enc) ? "encryption" : "decryption");
+                strbuf[0] = '\0';
+                i = EVP_read_pw_string((char *)strbuf, SIZE, prompt, enc);
+                if (i == 0) {
+                    if (strbuf[0] == '\0') {
+                        ret = 1;
+                        goto end;
+                    }
+                    str = strbuf;
+                    break;
+                }
+                if (i < 0) {
+                    BIO_printf(bio_err, "bad password read\n");
                     goto end;
                 }
-                str = strbuf;
-                break;
             }
-            if (i < 0) {
-                BIO_printf(bio_err, "bad password read\n");
-                goto end;
-            }
+        } else {
+#endif
+            BIO_printf(bio_err, "password required\n");
+            goto end;
         }
     }
 
     out = bio_open_default(outfile, 'w', outformat);
     if (out == NULL)
         goto end;
+
+    if (debug) {
+        BIO_set_callback(in, BIO_debug_callback);
+        BIO_set_callback(out, BIO_debug_callback);
+        BIO_set_callback_arg(in, (char *)bio_err);
+        BIO_set_callback_arg(out, (char *)bio_err);
+    }
 
     rbio = in;
     wbio = out;
@@ -385,6 +389,10 @@ int enc_main(int argc, char **argv)
     if (do_zlib) {
         if ((bzl = BIO_new(BIO_f_zlib())) == NULL)
             goto end;
+        if (debug) {
+            BIO_set_callback(bzl, BIO_debug_callback);
+            BIO_set_callback_arg(bzl, (char *)bio_err);
+        }
         if (enc)
             wbio = BIO_push(bzl, wbio);
         else
@@ -504,9 +512,6 @@ int enc_main(int argc, char **argv)
 
         BIO_get_cipher_ctx(benc, &ctx);
 
-        if (non_fips_allow)
-            EVP_CIPHER_CTX_set_flags(ctx, EVP_CIPH_FLAG_NON_FIPS_ALLOW);
-
         if (!EVP_CipherInit_ex(ctx, cipher, NULL, NULL, NULL, enc)) {
             BIO_printf(bio_err, "Error setting cipher %s\n",
                        EVP_CIPHER_name(cipher));
@@ -536,15 +541,15 @@ int enc_main(int argc, char **argv)
                     printf("%02X", salt[i]);
                 printf("\n");
             }
-            if (cipher->key_len > 0) {
+            if (EVP_CIPHER_key_length(cipher) > 0) {
                 printf("key=");
-                for (i = 0; i < cipher->key_len; i++)
+                for (i = 0; i < EVP_CIPHER_key_length(cipher); i++)
                     printf("%02X", key[i]);
                 printf("\n");
             }
-            if (cipher->iv_len > 0) {
+            if (EVP_CIPHER_iv_length(cipher) > 0) {
                 printf("iv =");
-                for (i = 0; i < cipher->iv_len; i++)
+                for (i = 0; i < EVP_CIPHER_iv_length(cipher); i++)
                     printf("%02X", iv[i]);
                 printf("\n");
             }
@@ -629,7 +634,7 @@ static int set_hex(char *in, unsigned char *out, int size)
             BIO_printf(bio_err, "non-hex digit\n");
             return (0);
         }
-        j = (unsigned char)app_hex(j);
+        j = (unsigned char)OPENSSL_hexchar2int(j);
         if (i & 1)
             out[i / 2] |= j;
         else

@@ -1,4 +1,3 @@
-/* crypto/rsa/rsa.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,108 +58,21 @@
 #ifndef HEADER_RSA_H
 # define HEADER_RSA_H
 
-# include <openssl/asn1.h>
+# include <openssl/opensslconf.h>
 
+# ifndef OPENSSL_NO_RSA
+# include <openssl/asn1.h>
 # include <openssl/bio.h>
 # include <openssl/crypto.h>
 # include <openssl/ossl_typ.h>
-# ifdef OPENSSL_USE_DEPRECATED
+# if OPENSSL_API_COMPAT < 0x10100000L
 #  include <openssl/bn.h>
 # endif
-
-# ifdef OPENSSL_NO_RSA
-#  error RSA is disabled.
+# ifdef  __cplusplus
+extern "C" {
 # endif
 
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
-/* Declared already in ossl_typ.h */
-/* typedef struct rsa_st RSA; */
-/* typedef struct rsa_meth_st RSA_METHOD; */
-
-struct rsa_meth_st {
-    const char *name;
-    int (*rsa_pub_enc) (int flen, const unsigned char *from,
-                        unsigned char *to, RSA *rsa, int padding);
-    int (*rsa_pub_dec) (int flen, const unsigned char *from,
-                        unsigned char *to, RSA *rsa, int padding);
-    int (*rsa_priv_enc) (int flen, const unsigned char *from,
-                         unsigned char *to, RSA *rsa, int padding);
-    int (*rsa_priv_dec) (int flen, const unsigned char *from,
-                         unsigned char *to, RSA *rsa, int padding);
-    /* Can be null */
-    int (*rsa_mod_exp) (BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx);
-    /* Can be null */
-    int (*bn_mod_exp) (BIGNUM *r, const BIGNUM *a, const BIGNUM *p,
-                       const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);
-    /* called at new */
-    int (*init) (RSA *rsa);
-    /* called at free */
-    int (*finish) (RSA *rsa);
-    /* RSA_METHOD_FLAG_* things */
-    int flags;
-    /* may be needed! */
-    char *app_data;
-    /*
-     * New sign and verify functions: some libraries don't allow arbitrary
-     * data to be signed/verified: this allows them to be used. Note: for
-     * this to work the RSA_public_decrypt() and RSA_private_encrypt() should
-     * *NOT* be used RSA_sign(), RSA_verify() should be used instead. Note:
-     * for backwards compatibility this functionality is only enabled if the
-     * RSA_FLAG_SIGN_VER option is set in 'flags'.
-     */
-    int (*rsa_sign) (int type,
-                     const unsigned char *m, unsigned int m_length,
-                     unsigned char *sigret, unsigned int *siglen,
-                     const RSA *rsa);
-    int (*rsa_verify) (int dtype, const unsigned char *m,
-                       unsigned int m_length, const unsigned char *sigbuf,
-                       unsigned int siglen, const RSA *rsa);
-    /*
-     * If this callback is NULL, the builtin software RSA key-gen will be
-     * used. This is for behavioural compatibility whilst the code gets
-     * rewired, but one day it would be nice to assume there are no such
-     * things as "builtin software" implementations.
-     */
-    int (*rsa_keygen) (RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb);
-};
-
-struct rsa_st {
-    /*
-     * The first parameter is used to pickup errors where this is passed
-     * instead of aEVP_PKEY, it is set to 0
-     */
-    int pad;
-    long version;
-    const RSA_METHOD *meth;
-    /* functional reference if 'meth' is ENGINE-provided */
-    ENGINE *engine;
-    BIGNUM *n;
-    BIGNUM *e;
-    BIGNUM *d;
-    BIGNUM *p;
-    BIGNUM *q;
-    BIGNUM *dmp1;
-    BIGNUM *dmq1;
-    BIGNUM *iqmp;
-    /* be careful using this if the RSA structure is shared */
-    CRYPTO_EX_DATA ex_data;
-    int references;
-    int flags;
-    /* Used to cache montgomery values */
-    BN_MONT_CTX *_method_mod_n;
-    BN_MONT_CTX *_method_mod_p;
-    BN_MONT_CTX *_method_mod_q;
-    /*
-     * all BIGNUM values are actually in the following data, if it is not
-     * NULL
-     */
-    char *bignum_data;
-    BN_BLINDING *blinding;
-    BN_BLINDING *mt_blinding;
-};
+/* The types RSA and RSA_METHOD are defined in ossl_typ.h */
 
 # ifndef OPENSSL_RSA_MAX_MODULUS_BITS
 #  define OPENSSL_RSA_MAX_MODULUS_BITS   16384
@@ -196,12 +108,6 @@ struct rsa_st {
 # define RSA_FLAG_EXT_PKEY               0x0020
 
 /*
- * This flag in the RSA_METHOD enables the new rsa_sign, rsa_verify
- * functions.
- */
-# define RSA_FLAG_SIGN_VER               0x0040
-
-/*
  * new with 0.9.6j and 0.9.7b; the built-in
  * RSA implementation now uses blinding by
  * default (ignoring RSA_FLAG_BLINDING),
@@ -220,7 +126,7 @@ struct rsa_st {
  * private key operations.
  */
 # define RSA_FLAG_NO_CONSTTIME           0x0100
-# ifdef OPENSSL_USE_DEPRECATED
+# if OPENSSL_API_COMPAT < 0x00908000L
 /* deprecated name for the flag*/
 /*
  * new with 0.9.7h; the built-in RSA
@@ -323,12 +229,22 @@ int RSA_bits(const RSA *rsa);
 int RSA_size(const RSA *rsa);
 int RSA_security_bits(const RSA *rsa);
 
+int RSA_set0_key(RSA *r, BIGNUM *n, BIGNUM *e, BIGNUM *d);
+int RSA_set0_factors(RSA *r, BIGNUM *p, BIGNUM *q);
+int RSA_set0_crt_params(RSA *r,BIGNUM *dmp1, BIGNUM *dmq1, BIGNUM *iqmp);
+void RSA_get0_key(const RSA *r, BIGNUM **n, BIGNUM **e, BIGNUM **d);
+void RSA_get0_factors(const RSA *r, BIGNUM **p, BIGNUM **q);
+void RSA_get0_crt_params(const RSA *r,
+                         BIGNUM **dmp1, BIGNUM **dmq1, BIGNUM **iqmp);
+void RSA_clear_flags(RSA *r, int flags);
+int RSA_test_flags(const RSA *r, int flags);
+void RSA_set_flags(RSA *r, int flags);
+ENGINE *RSA_get0_engine(RSA *r);
+
 /* Deprecated version */
-# ifdef OPENSSL_USE_DEPRECATED
-DECLARE_DEPRECATED(RSA *RSA_generate_key(int bits, unsigned long e, void
-                                          (*callback) (int, int, void *),
-                                         void *cb_arg));
-# endif                         /* defined(OPENSSL_USE_DEPRECATED) */
+DEPRECATEDIN_0_9_8(RSA *RSA_generate_key(int bits, unsigned long e, void
+                                         (*callback) (int, int, void *),
+                                         void *cb_arg))
 
 /* New version */
 int RSA_generate_key_ex(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb);
@@ -365,8 +281,8 @@ int RSA_set_method(RSA *rsa, const RSA_METHOD *meth);
 /* This function needs the memory locking malloc callbacks to be installed */
 int RSA_memory_lock(RSA *r);
 
-/* these are the actual SSLeay RSA functions */
-const RSA_METHOD *RSA_PKCS1_SSLeay(void);
+/* these are the actual RSA functions */
+const RSA_METHOD *RSA_PKCS1_OpenSSL(void);
 
 const RSA_METHOD *RSA_null_method(void);
 
@@ -478,8 +394,8 @@ int RSA_padding_add_PKCS1_PSS_mgf1(RSA *rsa, unsigned char *EM,
                                    const EVP_MD *Hash, const EVP_MD *mgf1Hash,
                                    int sLen);
 
-int RSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                         CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func);
+#define RSA_get_ex_new_index(l, p, newf, dupf, freef) \
+    CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_RSA, l, p, newf, dupf, freef)
 int RSA_set_ex_data(RSA *r, int idx, void *arg);
 void *RSA_get_ex_data(const RSA *r, int idx);
 
@@ -508,6 +424,87 @@ RSA *RSAPrivateKey_dup(RSA *rsa);
  */
 # define RSA_FLAG_CHECKED                        0x0800
 
+RSA_METHOD *RSA_meth_new(const char *name, int flags);
+void RSA_meth_free(RSA_METHOD *meth);
+RSA_METHOD *RSA_meth_dup(const RSA_METHOD *meth);
+const char *RSA_meth_get0_name(const RSA_METHOD *meth);
+int RSA_meth_set1_name(RSA_METHOD *meth, const char *name);
+int RSA_meth_get_flags(RSA_METHOD *meth);
+int RSA_meth_set_flags(RSA_METHOD *meth, int flags);
+void *RSA_meth_get0_app_data(const RSA_METHOD *meth);
+int RSA_meth_set0_app_data(RSA_METHOD *meth, void *app_data);
+int (*RSA_meth_get_pub_enc(const RSA_METHOD *meth))
+    (int flen, const unsigned char *from,
+     unsigned char *to, RSA *rsa, int padding);
+int RSA_meth_set_pub_enc(RSA_METHOD *rsa,
+                         int (*pub_enc) (int flen, const unsigned char *from,
+                                         unsigned char *to, RSA *rsa,
+                                         int padding));
+int (*RSA_meth_get_pub_dec(const RSA_METHOD *meth))
+    (int flen, const unsigned char *from,
+     unsigned char *to, RSA *rsa, int padding);
+int RSA_meth_set_pub_dec(RSA_METHOD *rsa,
+                         int (*pub_dec) (int flen, const unsigned char *from,
+                                         unsigned char *to, RSA *rsa,
+                                         int padding));
+int (*RSA_meth_get_priv_enc(const RSA_METHOD *meth))
+    (int flen, const unsigned char *from,
+     unsigned char *to, RSA *rsa, int padding);
+int RSA_meth_set_priv_enc(RSA_METHOD *rsa,
+                          int (*priv_enc) (int flen, const unsigned char *from,
+                                           unsigned char *to, RSA *rsa,
+                                           int padding));
+int (*RSA_meth_get_priv_dec(const RSA_METHOD *meth))
+    (int flen, const unsigned char *from,
+     unsigned char *to, RSA *rsa, int padding);
+int RSA_meth_set_priv_dec(RSA_METHOD *rsa,
+                          int (*priv_dec) (int flen, const unsigned char *from,
+                                           unsigned char *to, RSA *rsa,
+                                           int padding));
+int (*RSA_meth_get_mod_exp(const RSA_METHOD *meth))
+    (BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx);
+int RSA_meth_set_mod_exp(RSA_METHOD *rsa,
+                         int (*mod_exp) (BIGNUM *r0, const BIGNUM *I, RSA *rsa,
+                                         BN_CTX *ctx));
+int (*RSA_meth_get_bn_mod_exp(const RSA_METHOD *meth))
+    (BIGNUM *r, const BIGNUM *a, const BIGNUM *p,
+     const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);
+int RSA_meth_set_bn_mod_exp(RSA_METHOD *rsa,
+                            int (*bn_mod_exp) (BIGNUM *r,
+                                               const BIGNUM *a,
+                                               const BIGNUM *p,
+                                               const BIGNUM *m,
+                                               BN_CTX *ctx,
+                                               BN_MONT_CTX *m_ctx));
+int (*RSA_meth_get_init(const RSA_METHOD *meth)) (RSA *rsa);
+int RSA_meth_set_init(RSA_METHOD *rsa, int (*init) (RSA *rsa));
+int (*RSA_meth_get_finish(const RSA_METHOD *meth)) (RSA *rsa);
+int RSA_meth_set_finish(RSA_METHOD *rsa, int (*finish) (RSA *rsa));
+int (*RSA_meth_get_sign(const RSA_METHOD *meth))
+    (int type,
+     const unsigned char *m, unsigned int m_length,
+     unsigned char *sigret, unsigned int *siglen,
+     const RSA *rsa);
+int RSA_meth_set_sign(RSA_METHOD *rsa,
+                      int (*sign) (int type, const unsigned char *m,
+                                   unsigned int m_length,
+                                   unsigned char *sigret, unsigned int *siglen,
+                                   const RSA *rsa));
+int (*RSA_meth_get_verify(const RSA_METHOD *meth))
+    (int dtype, const unsigned char *m,
+     unsigned int m_length, const unsigned char *sigbuf,
+     unsigned int siglen, const RSA *rsa);
+int RSA_meth_set_verify(RSA_METHOD *rsa,
+                        int (*verify) (int dtype, const unsigned char *m,
+                                       unsigned int m_length,
+                                       const unsigned char *sigbuf,
+                                       unsigned int siglen, const RSA *rsa));
+int (*RSA_meth_get_keygen(const RSA_METHOD *meth))
+    (RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb);
+int RSA_meth_set_keygen(RSA_METHOD *rsa,
+                        int (*keygen) (RSA *rsa, int bits, BIGNUM *e,
+                                       BN_GENCB *cb));
+
 /* BEGIN ERROR CODES */
 /*
  * The following lines are auto generated by the script mkerr.pl. Any changes
@@ -535,10 +532,10 @@ void ERR_load_RSA_strings(void);
 # define RSA_F_RSA_CHECK_KEY                              123
 # define RSA_F_RSA_CHECK_KEY_EX                           160
 # define RSA_F_RSA_CMS_DECRYPT                            159
-# define RSA_F_RSA_EAY_PRIVATE_DECRYPT                    101
-# define RSA_F_RSA_EAY_PRIVATE_ENCRYPT                    102
-# define RSA_F_RSA_EAY_PUBLIC_DECRYPT                     103
-# define RSA_F_RSA_EAY_PUBLIC_ENCRYPT                     104
+# define RSA_F_RSA_OSSL_PRIVATE_DECRYPT                   101
+# define RSA_F_RSA_OSSL_PRIVATE_ENCRYPT                   102
+# define RSA_F_RSA_OSSL_PUBLIC_DECRYPT                    103
+# define RSA_F_RSA_OSSL_PUBLIC_ENCRYPT                    104
 # define RSA_F_RSA_GENERATE_KEY                           105
 # define RSA_F_RSA_ITEM_VERIFY                            148
 # define RSA_F_RSA_MEMORY_LOCK                            130
@@ -647,7 +644,9 @@ void ERR_load_RSA_strings(void);
 # define RSA_R_VALUE_MISSING                              147
 # define RSA_R_WRONG_SIGNATURE_LENGTH                     119
 
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
+
 #endif

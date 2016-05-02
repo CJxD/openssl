@@ -1,4 +1,3 @@
-/* a_strex.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -305,7 +304,7 @@ static int do_dump(unsigned long lflags, char_io *io_ch, void *arg,
     t.value.ptr = (char *)str;
     der_len = i2d_ASN1_TYPE(&t, NULL);
     der_buf = OPENSSL_malloc(der_len);
-    if (!der_buf)
+    if (der_buf == NULL)
         return -1;
     p = der_buf;
     i2d_ASN1_TYPE(&t, &p);

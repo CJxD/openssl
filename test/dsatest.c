@@ -1,4 +1,3 @@
-/* crypto/dsa/dsatest.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -134,15 +133,14 @@ int main(int argc, char **argv)
     unsigned long h;
     unsigned char sig[256];
     unsigned int siglen;
+    BIGNUM *p = NULL, *q = NULL, *g = NULL;
 
     if (bio_err == NULL)
         bio_err = BIO_new_fp(stderr, BIO_NOCLOSE | BIO_FP_TEXT);
 
-    CRYPTO_malloc_debug_init();
-    CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+    CRYPTO_set_mem_debug(1);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
-    ERR_load_crypto_strings();
     RAND_seed(rnd_seed, sizeof rnd_seed);
 
     BIO_printf(bio_err, "test generation of DSA parameters\n");
@@ -175,34 +173,35 @@ int main(int argc, char **argv)
         goto end;
     }
 
-    i = BN_bn2bin(dsa->q, buf);
+    DSA_get0_pqg(dsa, &p, &q, &g);
+    i = BN_bn2bin(q, buf);
     j = sizeof(out_q);
     if ((i != j) || (memcmp(buf, out_q, i) != 0)) {
         BIO_printf(bio_err, "q value is wrong\n");
         goto end;
     }
 
-    i = BN_bn2bin(dsa->p, buf);
+    i = BN_bn2bin(p, buf);
     j = sizeof(out_p);
     if ((i != j) || (memcmp(buf, out_p, i) != 0)) {
         BIO_printf(bio_err, "p value is wrong\n");
         goto end;
     }
 
-    i = BN_bn2bin(dsa->g, buf);
+    i = BN_bn2bin(g, buf);
     j = sizeof(out_g);
     if ((i != j) || (memcmp(buf, out_g, i) != 0)) {
         BIO_printf(bio_err, "g value is wrong\n");
         goto end;
     }
 
-    dsa->flags |= DSA_FLAG_NO_EXP_CONSTTIME;
+    DSA_set_flags(dsa, DSA_FLAG_NO_EXP_CONSTTIME);
     DSA_generate_key(dsa);
     DSA_sign(0, str1, 20, sig, &siglen, dsa);
     if (DSA_verify(0, str1, 20, sig, siglen, dsa) == 1)
         ret = 1;
 
-    dsa->flags &= ~DSA_FLAG_NO_EXP_CONSTTIME;
+    DSA_clear_flags(dsa, DSA_FLAG_NO_EXP_CONSTTIME);
     DSA_generate_key(dsa);
     DSA_sign(0, str1, 20, sig, &siglen, dsa);
     if (DSA_verify(0, str1, 20, sig, siglen, dsa) == 1)
@@ -213,16 +212,13 @@ int main(int argc, char **argv)
         ERR_print_errors(bio_err);
     DSA_free(dsa);
     BN_GENCB_free(cb);
-    CRYPTO_cleanup_all_ex_data();
-    ERR_remove_thread_state(NULL);
-    ERR_free_strings();
-    CRYPTO_mem_leaks(bio_err);
+
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+    if (CRYPTO_mem_leaks(bio_err) <= 0)
+        ret = 0;
+#endif
     BIO_free(bio_err);
     bio_err = NULL;
-# ifdef OPENSSL_SYS_NETWARE
-    if (!ret)
-        printf("ERROR\n");
-# endif
     EXIT(!ret);
 }
 
@@ -247,7 +243,7 @@ static int dsa_cb(int p, int n, BN_GENCB *arg)
     (void)BIO_flush(BN_GENCB_get_arg(arg));
 
     if (!ok && (p == 0) && (num > 1)) {
-        BIO_printf((BIO *)arg, "error in dsatest\n");
+        BIO_printf(BN_GENCB_get_arg(arg), "error in dsatest\n");
         return 0;
     }
     return 1;

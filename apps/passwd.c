@@ -118,7 +118,10 @@ int passwd_main(int argc, char **argv)
     char *infile = NULL, *salt = NULL, *passwd = NULL, **passwds = NULL;
     char *salt_malloc = NULL, *passwd_malloc = NULL, *prog;
     OPTION_CHOICE o;
-    int in_stdin = 0, in_noverify = 0, pw_source_defined = 0;
+    int in_stdin = 0, pw_source_defined = 0;
+#ifndef OPENSSL_NO_UI
+    int in_noverify = 0;
+#endif
     int passed_salt = 0, quiet = 0, table = 0, reverse = 0;
     int ret = 1, usecrypt = 0, use1 = 0, useapr1 = 0;
     size_t passwd_malloc_size = 0, pw_maxlen = 256;
@@ -142,7 +145,9 @@ int passwd_main(int argc, char **argv)
             pw_source_defined = 1;
             break;
         case OPT_NOVERIFY:
+#ifndef OPENSSL_NO_UI
             in_noverify = 1;
+#endif
             break;
         case OPT_QUIET:
             quiet = 1;
@@ -170,6 +175,7 @@ int passwd_main(int argc, char **argv)
             if (pw_source_defined)
                 goto opthelp;
             in_stdin = 1;
+            pw_source_defined = 1;
             break;
         }
     }
@@ -201,17 +207,20 @@ int passwd_main(int argc, char **argv)
         goto opthelp;
 # endif
 
-    if (!app_load_modules(NULL))
-        goto end;
-
-    if (infile && in_stdin) {
+    if (infile != NULL && in_stdin) {
         BIO_printf(bio_err, "%s: Can't combine -in and -stdin\n", prog);
         goto end;
     }
 
-    in = bio_open_default(infile, 'r', FORMAT_TEXT);
-    if (in == NULL)
-        goto end;
+    if (infile != NULL || in_stdin) {
+        /*
+         * If in_stdin is true, we know that infile is NULL, and that
+         * bio_open_default() will give us back an alias for stdin.
+         */
+        in = bio_open_default(infile, 'r', FORMAT_TEXT);
+        if (in == NULL)
+            goto end;
+    }
 
     if (usecrypt)
         pw_maxlen = 8;
@@ -229,17 +238,25 @@ int passwd_main(int argc, char **argv)
     }
 
     if ((in == NULL) && (passwds == NULL)) {
-        /* build a null-terminated list */
-        static char *passwds_static[2] = { NULL, NULL };
+        if (1) {
+#ifndef OPENSSL_NO_UI
+            /* build a null-terminated list */
+            static char *passwds_static[2] = { NULL, NULL };
 
-        passwds = passwds_static;
-        if (in == NULL)
-            if (EVP_read_pw_string
-                (passwd_malloc, passwd_malloc_size, "Password: ",
-                 !(passed_salt || in_noverify)) != 0)
-                goto end;
-        passwds[0] = passwd_malloc;
+            passwds = passwds_static;
+            if (in == NULL)
+                if (EVP_read_pw_string
+                    (passwd_malloc, passwd_malloc_size, "Password: ",
+                     !(passed_salt || in_noverify)) != 0)
+                    goto end;
+            passwds[0] = passwd_malloc;
+        } else {
+#endif
+            BIO_printf(bio_err, "password required\n");
+            goto end;
+        }
     }
+
 
     if (in == NULL) {
         assert(passwds != NULL);
@@ -310,60 +327,65 @@ static char *md5crypt(const char *passwd, const char *magic, const char *salt)
     char *salt_out;
     int n;
     unsigned int i;
-    EVP_MD_CTX md, md2;
+    EVP_MD_CTX *md, *md2;
     size_t passwd_len, salt_len;
 
     passwd_len = strlen(passwd);
     out_buf[0] = '$';
     out_buf[1] = 0;
     assert(strlen(magic) <= 4); /* "1" or "apr1" */
-    strncat(out_buf, magic, 4);
-    strncat(out_buf, "$", 1);
-    strncat(out_buf, salt, 8);
+    OPENSSL_strlcat(out_buf, magic, sizeof out_buf);
+    OPENSSL_strlcat(out_buf, "$", sizeof out_buf);
+    OPENSSL_strlcat(out_buf, salt, sizeof out_buf);
     assert(strlen(out_buf) <= 6 + 8); /* "$apr1$..salt.." */
     salt_out = out_buf + 2 + strlen(magic);
     salt_len = strlen(salt_out);
     assert(salt_len <= 8);
 
-    EVP_MD_CTX_init(&md);
-    EVP_DigestInit_ex(&md, EVP_md5(), NULL);
-    EVP_DigestUpdate(&md, passwd, passwd_len);
-    EVP_DigestUpdate(&md, "$", 1);
-    EVP_DigestUpdate(&md, magic, strlen(magic));
-    EVP_DigestUpdate(&md, "$", 1);
-    EVP_DigestUpdate(&md, salt_out, salt_len);
+    md = EVP_MD_CTX_new();
+    if (md == NULL)
+        return NULL;
+    EVP_DigestInit_ex(md, EVP_md5(), NULL);
+    EVP_DigestUpdate(md, passwd, passwd_len);
+    EVP_DigestUpdate(md, "$", 1);
+    EVP_DigestUpdate(md, magic, strlen(magic));
+    EVP_DigestUpdate(md, "$", 1);
+    EVP_DigestUpdate(md, salt_out, salt_len);
 
-    EVP_MD_CTX_init(&md2);
-    EVP_DigestInit_ex(&md2, EVP_md5(), NULL);
-    EVP_DigestUpdate(&md2, passwd, passwd_len);
-    EVP_DigestUpdate(&md2, salt_out, salt_len);
-    EVP_DigestUpdate(&md2, passwd, passwd_len);
-    EVP_DigestFinal_ex(&md2, buf, NULL);
+    md2 = EVP_MD_CTX_new();
+    if (md2 == NULL)
+        return NULL;
+    EVP_DigestInit_ex(md2, EVP_md5(), NULL);
+    EVP_DigestUpdate(md2, passwd, passwd_len);
+    EVP_DigestUpdate(md2, salt_out, salt_len);
+    EVP_DigestUpdate(md2, passwd, passwd_len);
+    EVP_DigestFinal_ex(md2, buf, NULL);
 
     for (i = passwd_len; i > sizeof buf; i -= sizeof buf)
-        EVP_DigestUpdate(&md, buf, sizeof buf);
-    EVP_DigestUpdate(&md, buf, i);
+        EVP_DigestUpdate(md, buf, sizeof buf);
+    EVP_DigestUpdate(md, buf, i);
 
     n = passwd_len;
     while (n) {
-        EVP_DigestUpdate(&md, (n & 1) ? "\0" : passwd, 1);
+        EVP_DigestUpdate(md, (n & 1) ? "\0" : passwd, 1);
         n >>= 1;
     }
-    EVP_DigestFinal_ex(&md, buf, NULL);
+    EVP_DigestFinal_ex(md, buf, NULL);
 
     for (i = 0; i < 1000; i++) {
-        EVP_DigestInit_ex(&md2, EVP_md5(), NULL);
-        EVP_DigestUpdate(&md2, (i & 1) ? (unsigned const char *)passwd : buf,
+        EVP_DigestInit_ex(md2, EVP_md5(), NULL);
+        EVP_DigestUpdate(md2, (i & 1) ? (unsigned const char *)passwd : buf,
                          (i & 1) ? passwd_len : sizeof buf);
         if (i % 3)
-            EVP_DigestUpdate(&md2, salt_out, salt_len);
+            EVP_DigestUpdate(md2, salt_out, salt_len);
         if (i % 7)
-            EVP_DigestUpdate(&md2, passwd, passwd_len);
-        EVP_DigestUpdate(&md2, (i & 1) ? buf : (unsigned const char *)passwd,
+            EVP_DigestUpdate(md2, passwd, passwd_len);
+        EVP_DigestUpdate(md2, (i & 1) ? buf : (unsigned const char *)passwd,
                          (i & 1) ? sizeof buf : passwd_len);
-        EVP_DigestFinal_ex(&md2, buf, NULL);
+        EVP_DigestFinal_ex(md2, buf, NULL);
     }
-    EVP_MD_CTX_cleanup(&md2);
+    EVP_MD_CTX_free(md2);
+    EVP_MD_CTX_free(md);
 
     {
         /* transform buf into output string */
@@ -402,7 +424,6 @@ static char *md5crypt(const char *passwd, const char *magic, const char *salt)
         *output = 0;
         assert(strlen(out_buf) < sizeof(out_buf));
     }
-    EVP_MD_CTX_cleanup(&md);
 
     return out_buf;
 }

@@ -1,4 +1,3 @@
-/* crypto/dh/dh_gen.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -64,7 +63,7 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/bn.h>
-#include <openssl/dh.h>
+#include "dh_locl.h"
 
 static int dh_builtin_genparams(DH *ret, int prime_len, int generator,
                                 BN_GENCB *cb);

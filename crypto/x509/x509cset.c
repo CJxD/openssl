@@ -1,4 +1,3 @@
-/* crypto/x509/x509cset.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2001.
@@ -135,7 +134,8 @@ int X509_CRL_sort(X509_CRL *c)
 
 void X509_CRL_up_ref(X509_CRL *crl)
 {
-    CRYPTO_add(&crl->references, 1, CRYPTO_LOCK_X509_CRL);
+    int i;
+    CRYPTO_atomic_add(&crl->references, 1, &i, crl->lock);
 }
 
 long X509_CRL_get_version(X509_CRL *crl)
@@ -172,7 +172,7 @@ void X509_CRL_get0_signature(ASN1_BIT_STRING **psig, X509_ALGOR **palg,
                              X509_CRL *crl)
 {
     if (psig != NULL)
-        *psig = crl->signature;
+        *psig = &crl->signature;
     if (palg != NULL)
         *palg = &crl->sig_alg;
 }
@@ -206,7 +206,7 @@ int X509_REVOKED_set_revocationDate(X509_REVOKED *x, ASN1_TIME *tm)
 
 ASN1_INTEGER *X509_REVOKED_get0_serialNumber(X509_REVOKED *x)
 {
-    return x->serialNumber;
+    return &x->serialNumber;
 }
 
 int X509_REVOKED_set_serialNumber(X509_REVOKED *x, ASN1_INTEGER *serial)
@@ -215,15 +215,10 @@ int X509_REVOKED_set_serialNumber(X509_REVOKED *x, ASN1_INTEGER *serial)
 
     if (x == NULL)
         return (0);
-    in = x->serialNumber;
-    if (in != serial) {
-        in = ASN1_INTEGER_dup(serial);
-        if (in != NULL) {
-            ASN1_INTEGER_free(x->serialNumber);
-            x->serialNumber = in;
-        }
-    }
-    return (in != NULL);
+    in = &x->serialNumber;
+    if (in != serial)
+        return ASN1_STRING_copy(in, serial);
+    return 1;
 }
 
 STACK_OF(X509_EXTENSION) *X509_REVOKED_get0_extensions(X509_REVOKED *r)

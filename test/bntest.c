@@ -1,4 +1,3 @@
-/* crypto/bn/bntest.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -81,6 +80,20 @@
 #include <openssl/x509.h>
 #include <openssl/err.h>
 
+/*
+ * In bn_lcl.h, bn_expand() is defined as a static ossl_inline function.
+ * This is fine in itself, it will end up as an unused static function in
+ * the worst case.  However, it referenses bn_expand2(), which is a private
+ * function in libcrypto and therefore unavailable on some systems.  This
+ * may result in a linker error because of unresolved symbols.
+ *
+ * To avoid this, we define a dummy variant of bn_expand2() here, and to
+ * avoid possible clashes with libcrypto, we rename it first, using a macro.
+ */
+#define bn_expand2 dummy_bn_expand2
+BIGNUM *bn_expand2(BIGNUM *b, int words);
+BIGNUM *bn_expand2(BIGNUM *b, int words) { return NULL; }
+
 #include "../crypto/bn/bn_lcl.h"
 
 static const int num0 = 100;           /* number of tests */
@@ -117,7 +130,6 @@ int test_gf2m_mod_solve_quad(BIO *bp, BN_CTX *ctx);
 int test_kron(BIO *bp, BN_CTX *ctx);
 int test_sqrt(BIO *bp, BN_CTX *ctx);
 int test_small_prime(BIO *bp, BN_CTX *ctx);
-int test_probable_prime_coprime(BIO *bp, BN_CTX *ctx);
 int rand_neg(void);
 static int results = 0;
 
@@ -141,6 +153,9 @@ int main(int argc, char *argv[])
     BN_CTX *ctx;
     BIO *out;
     char *outfile = NULL;
+
+    CRYPTO_set_mem_debug(1);
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
     results = 0;
 
@@ -292,15 +307,6 @@ int main(int argc, char *argv[])
         goto err;
     (void)BIO_flush(out);
 
-#ifdef OPENSSL_SYS_WIN32
-    message(out, "Probable prime generation with coprimes disabled");
-#else
-    message(out, "Probable prime generation with coprimes");
-    if (!test_probable_prime_coprime(out, ctx))
-        goto err;
-#endif
-    (void)BIO_flush(out);
-
 #ifndef OPENSSL_NO_EC2M
     message(out, "BN_GF2m_add");
     if (!test_gf2m_add(out))
@@ -350,13 +356,21 @@ int main(int argc, char *argv[])
     BN_CTX_free(ctx);
     BIO_free(out);
 
+    ERR_print_errors_fp(stderr);
+
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+    if (CRYPTO_mem_leaks_fp(stderr) <= 0)
+        EXIT(1);
+#endif
     EXIT(0);
  err:
     BIO_puts(out, "1\n");       /* make sure the Perl script fed by bc
                                  * notices the failure, see test_bn in
                                  * test/Makefile.ssl */
     (void)BIO_flush(out);
-    ERR_load_crypto_strings();
+    BN_CTX_free(ctx);
+    BIO_free(out);
+
     ERR_print_errors_fp(stderr);
     EXIT(1);
 }
@@ -513,18 +527,25 @@ int test_div(BIO *bp, BN_CTX *ctx)
 
 static void print_word(BIO *bp, BN_ULONG w)
 {
-#ifdef SIXTY_FOUR_BIT
-    if (sizeof(w) > sizeof(unsigned long)) {
-        unsigned long h = (unsigned long)(w >> 32), l = (unsigned long)(w);
+    int i = sizeof(w) * 8;
+    char *fmt = NULL;
+    unsigned char byte;
 
-        if (h)
-            BIO_printf(bp, "%lX%08lX", h, l);
+    do {
+        i -= 8;
+        byte = (unsigned char)(w >> i);
+        if (fmt == NULL)
+            fmt = byte ? "%X" : NULL;
         else
-            BIO_printf(bp, "%lX", l);
-        return;
-    }
-#endif
-    BIO_printf(bp, BN_HEX_FMT1, w);
+            fmt = "%02X";
+
+        if (fmt != NULL)
+            BIO_printf(bp, fmt, byte);
+    } while (i);
+
+    /* If we haven't printed anything, at least print a zero! */
+    if (fmt == NULL)
+        BIO_printf(bp, "0");
 }
 
 int test_div_word(BIO *bp)
@@ -1023,6 +1044,24 @@ int test_mod_exp(BIO *bp, BN_CTX *ctx)
             return 0;
         }
     }
+
+    /* Regression test for carry propagation bug in sqr8x_reduction */
+    BN_hex2bn(&a, "050505050505");
+    BN_hex2bn(&b, "02");
+    BN_hex2bn(&c,
+        "4141414141414141414141274141414141414141414141414141414141414141"
+        "4141414141414141414141414141414141414141414141414141414141414141"
+        "4141414141414141414141800000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000001");
+    BN_mod_exp(d, a, b, c, ctx);
+    BN_mul(e, a, a, ctx);
+    if (BN_cmp(d, e)) {
+        fprintf(stderr, "BN_mod_exp and BN_mul produce different results!\n");
+        return 0;
+    }
+
     BN_free(a);
     BN_free(b);
     BN_free(c);
@@ -1841,37 +1880,6 @@ int test_small_prime(BIO *bp, BN_CTX *ctx)
     return ret;
 }
 
-#ifndef OPENSSL_SYS_WIN32
-int test_probable_prime_coprime(BIO *bp, BN_CTX *ctx)
-{
-    int i, j, ret = 0;
-    BIGNUM *r;
-    BN_ULONG primes[5] = { 2, 3, 5, 7, 11 };
-
-    r = BN_new();
-
-    for (i = 0; i < 1000; i++) {
-        if (!bn_probable_prime_dh_coprime(r, 1024, ctx))
-            goto err;
-
-        for (j = 0; j < 5; j++) {
-            if (BN_mod_word(r, primes[j]) == 0) {
-                BIO_printf(bp, "Number generated is not coprime to "
-			   BN_DEC_FMT1 ":\n", primes[j]);
-                BN_print_fp(stdout, r);
-                BIO_printf(bp, "\n");
-                goto err;
-            }
-        }
-    }
-
-    ret = 1;
-
- err:
-    BN_clear_free(r);
-    return ret;
-}
-#endif
 int test_lshift(BIO *bp, BN_CTX *ctx, BIGNUM *a_)
 {
     BIGNUM *a, *b, *c, *d;

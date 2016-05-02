@@ -1,4 +1,3 @@
-/* crypto/asn1/a_time.c */
 /* ====================================================================
  * Copyright (c) 1999 The OpenSSL Project.  All rights reserved.
  *
@@ -139,11 +138,11 @@ ASN1_GENERALIZEDTIME *ASN1_TIME_to_generalizedtime(ASN1_TIME *t,
     str = (char *)ret->data;
     /* Work out the century and prepend */
     if (t->data[0] >= '5')
-        BUF_strlcpy(str, "19", newlen);
+        OPENSSL_strlcpy(str, "19", newlen);
     else
-        BUF_strlcpy(str, "20", newlen);
+        OPENSSL_strlcpy(str, "20", newlen);
 
-    BUF_strlcat(str, (char *)t->data, newlen);
+    OPENSSL_strlcat(str, (char *)t->data, newlen);
 
     return ret;
 }

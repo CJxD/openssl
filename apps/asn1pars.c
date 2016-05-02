@@ -81,7 +81,7 @@ OPTIONS asn1parse_options[] = {
     {"inform", OPT_INFORM, 'F', "input format - one of DER PEM"},
     {"in", OPT_IN, '<', "input file"},
     {"out", OPT_OUT, '>', "output file (output format is always DER)"},
-    {"i", OPT_INDENT, 0, "entries"},
+    {"i", OPT_INDENT, 0, "indents the output"},
     {"noout", OPT_NOOUT, 0, "don't produce any output"},
     {"offset", OPT_OFFSET, 'p', "offset into file"},
     {"length", OPT_LENGTH, 'p', "length of section in file"},
@@ -184,10 +184,8 @@ int asn1parse_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
-
-    if (!app_load_modules(NULL))
-        goto end;
+    if (argc != 0)
+        goto opthelp;
 
     if (oidfile != NULL) {
         in = bio_open_default(oidfile, 'r', FORMAT_TEXT);
@@ -329,7 +327,6 @@ int asn1parse_main(int argc, char **argv)
         OPENSSL_free(str);
     ASN1_TYPE_free(at);
     sk_OPENSSL_STRING_free(osk);
-    OBJ_cleanup();
     return (ret);
 }
 

@@ -1,4 +1,3 @@
-/* crypto/bn/bn_rand.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -315,7 +314,7 @@ int BN_generate_dsa_nonce(BIGNUM *out, const BIGNUM *range,
     int ret = 0;
 
     k_bytes = OPENSSL_malloc(num_k_bytes);
-    if (!k_bytes)
+    if (k_bytes == NULL)
         goto err;
 
     /* We copy |priv| into a local buffer to avoid exposing its length. */

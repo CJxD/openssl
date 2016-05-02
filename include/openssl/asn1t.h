@@ -1,4 +1,3 @@
-/* asn1t.h */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -208,8 +207,8 @@ extern "C" {
         static const ASN1_AUX tname##_aux = {NULL, ASN1_AFLG_BROKEN, 0, 0, 0, 0}; \
         ASN1_SEQUENCE(tname)
 
-# define ASN1_SEQUENCE_ref(tname, cb, lck) \
-        static const ASN1_AUX tname##_aux = {NULL, ASN1_AFLG_REFCOUNT, offsetof(tname, references), lck, cb, 0}; \
+# define ASN1_SEQUENCE_ref(tname, cb) \
+        static const ASN1_AUX tname##_aux = {NULL, ASN1_AFLG_REFCOUNT, offsetof(tname, references), offsetof(tname, lock), cb, 0}; \
         ASN1_SEQUENCE(tname)
 
 # define ASN1_SEQUENCE_enc(tname, enc, cb) \
@@ -464,12 +463,12 @@ extern "C" {
 
 # ifndef OPENSSL_EXPORT_VAR_AS_FUNCTION
 
-#  define ASN1_ADB_END(name, flags, field, app_table, def, none) \
+#  define ASN1_ADB_END(name, flags, field, adb_cb, def, none) \
         ;\
         static const ASN1_ADB name##_adb = {\
                 flags,\
                 offsetof(name, field),\
-                app_table,\
+                adb_cb,\
                 name##_adbtbl,\
                 sizeof(name##_adbtbl) / sizeof(ASN1_ADB_TABLE),\
                 def,\
@@ -478,7 +477,7 @@ extern "C" {
 
 # else
 
-#  define ASN1_ADB_END(name, flags, field, app_table, def, none) \
+#  define ASN1_ADB_END(name, flags, field, adb_cb, def, none) \
         ;\
         static const ASN1_ITEM *name##_adb(void) \
         { \
@@ -486,7 +485,7 @@ extern "C" {
                 {\
                 flags,\
                 offsetof(name, field),\
-                app_table,\
+                adb_cb,\
                 name##_adbtbl,\
                 sizeof(name##_adbtbl) / sizeof(ASN1_ADB_TABLE),\
                 def,\
@@ -513,9 +512,7 @@ struct ASN1_TEMPLATE_st {
     unsigned long flags;        /* Various flags */
     long tag;                   /* tag, not used if no tagging */
     unsigned long offset;       /* Offset of this field in structure */
-# ifndef NO_ASN1_FIELD_NAMES
     const char *field_name;     /* Field name */
-# endif
     ASN1_ITEM_EXP *item;        /* Relevant ASN1_ITEM or ASN1_ADB */
 };
 
@@ -530,7 +527,7 @@ typedef struct ASN1_ADB_st ASN1_ADB;
 struct ASN1_ADB_st {
     unsigned long flags;        /* Various flags */
     unsigned long offset;       /* Offset of selector field */
-    STACK_OF(ASN1_ADB_TABLE) **app_items; /* Application defined items */
+    int (*adb_cb)(long *psel);  /* Application callback */
     const ASN1_ADB_TABLE *tbl;  /* Table of possible types */
     long tblcount;              /* Number of entries in tbl */
     const ASN1_TEMPLATE *default_tt; /* Type to use if no match */
@@ -632,9 +629,7 @@ struct ASN1_ITEM_st {
     long tcount;                /* Number of templates if SEQUENCE or CHOICE */
     const void *funcs;          /* functions that handle this type */
     long size;                  /* Structure size (usually) */
-# ifndef NO_ASN1_FIELD_NAMES
     const char *sname;          /* Structure name */
-# endif
 };
 
 /*-
@@ -964,7 +959,7 @@ DECLARE_ASN1_ITEM(BIGNUM)
 DECLARE_ASN1_ITEM(LONG)
 DECLARE_ASN1_ITEM(ZLONG)
 
-DECLARE_STACK_OF(ASN1_VALUE)
+DEFINE_STACK_OF(ASN1_VALUE)
 
 /* Functions used internally by the ASN1 code */
 

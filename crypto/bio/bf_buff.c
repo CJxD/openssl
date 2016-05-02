@@ -1,4 +1,3 @@
-/* crypto/bio/bf_buff.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -58,8 +57,8 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include "bio_lcl.h"
 #include "internal/cryptlib.h"
-#include <openssl/bio.h>
 
 static int buffer_write(BIO *h, const char *buf, int num);
 static int buffer_read(BIO *h, char *buf, int size);
@@ -71,7 +70,7 @@ static int buffer_free(BIO *data);
 static long buffer_callback_ctrl(BIO *h, int cmd, bio_info_cb *fp);
 #define DEFAULT_BUFFER_SIZE     4096
 
-static BIO_METHOD methods_buffer = {
+static const BIO_METHOD methods_buffer = {
     BIO_TYPE_BUFFER,
     "buffer",
     buffer_write,
@@ -84,7 +83,7 @@ static BIO_METHOD methods_buffer = {
     buffer_callback_ctrl,
 };
 
-BIO_METHOD *BIO_f_buffer(void)
+const BIO_METHOD *BIO_f_buffer(void)
 {
     return (&methods_buffer);
 }

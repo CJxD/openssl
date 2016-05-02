@@ -1,4 +1,3 @@
-/* crypto/x509/x_name.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -63,9 +62,14 @@
 #include <openssl/x509.h>
 #include "internal/x509_int.h"
 #include "internal/asn1_int.h"
+#include "x509_lcl.h"
 
-typedef STACK_OF(X509_NAME_ENTRY) STACK_OF_X509_NAME_ENTRY;
-DECLARE_STACK_OF(STACK_OF_X509_NAME_ENTRY)
+/*
+ * Maximum length of X509_NAME: much larger than anything we should
+ * ever see in practice.
+ */
+
+#define X509_NAME_MAX (1024 * 1024)
 
 static int x509_name_ex_d2i(ASN1_VALUE **val,
                             const unsigned char **in, long len,
@@ -135,7 +139,7 @@ static int x509_name_ex_new(ASN1_VALUE **val, const ASN1_ITEM *it)
 {
     X509_NAME *ret = OPENSSL_zalloc(sizeof(*ret));
 
-    if (!ret)
+    if (ret == NULL)
         goto memerr;
     if ((ret->entries = sk_X509_NAME_ENTRY_new_null()) == NULL)
         goto memerr;
@@ -190,6 +194,10 @@ static int x509_name_ex_d2i(ASN1_VALUE **val,
     int i, j, ret;
     STACK_OF(X509_NAME_ENTRY) *entries;
     X509_NAME_ENTRY *entry;
+    if (len > X509_NAME_MAX) {
+        ASN1err(ASN1_F_X509_NAME_EX_D2I, ASN1_R_TOO_LONG);
+        return 0;
+    }
     q = p;
 
     /* Get internal representation of Name */
@@ -327,7 +335,7 @@ static int x509_name_ex_print(BIO *out, ASN1_VALUE **pval,
  * it all strings are converted to UTF8, leading, trailing and multiple
  * spaces collapsed, converted to lower case and the leading SEQUENCE header
  * removed. In future we could also normalize the UTF8 too. By doing this
- * comparison of Name structures can be rapidly perfomed by just using
+ * comparison of Name structures can be rapidly performed by just using
  * memcmp() of the canonical encoding. By omitting the leading SEQUENCE name
  * constraints of type dirName can also be checked with a simple memcmp().
  */
@@ -338,7 +346,7 @@ static int x509_name_canon(X509_NAME *a)
     STACK_OF(STACK_OF_X509_NAME_ENTRY) *intname = NULL;
     STACK_OF(X509_NAME_ENTRY) *entries = NULL;
     X509_NAME_ENTRY *entry, *tmpentry = NULL;
-    int i, set = -1, ret = 0;
+    int i, set = -1, ret = 0, len;
 
     OPENSSL_free(a->canon_enc);
     a->canon_enc = NULL;
@@ -361,7 +369,7 @@ static int x509_name_canon(X509_NAME *a)
             set = entry->set;
         }
         tmpentry = X509_NAME_ENTRY_new();
-        if (!tmpentry)
+        if (tmpentry == NULL)
             goto err;
         tmpentry->object = OBJ_dup(entry->object);
         if (!asn1_string_canon(tmpentry->value, entry->value))
@@ -373,11 +381,14 @@ static int x509_name_canon(X509_NAME *a)
 
     /* Finally generate encoding */
 
-    a->canon_enclen = i2d_name_canon(intname, NULL);
+    len = i2d_name_canon(intname, NULL);
+    if (len < 0)
+        goto err;
+    a->canon_enclen = len;
 
     p = OPENSSL_malloc(a->canon_enclen);
 
-    if (!p)
+    if (p == NULL)
         goto err;
 
     a->canon_enc = p;
@@ -569,4 +580,17 @@ int X509_NAME_print(BIO *bp, X509_NAME *name, int obase)
     X509err(X509_F_X509_NAME_PRINT, ERR_R_BUF_LIB);
     OPENSSL_free(b);
     return 0;
+}
+
+int X509_NAME_get0_der(const unsigned char **pder, size_t *pderlen,
+                       X509_NAME *nm)
+{
+    /* Make sure encoding is valid */
+    if (i2d_X509_NAME(nm, NULL) <= 0)
+        return 0;
+    if (pder != NULL)
+        *pder = (unsigned char *)nm->bytes->data;
+    if (pderlen != NULL)
+        *pderlen = nm->bytes->length;
+    return 1;
 }

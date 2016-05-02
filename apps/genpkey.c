@@ -170,7 +170,9 @@ int genpkey_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
+    if (argc != 0)
+        goto opthelp;
+
     private = do_param ? 0 : 1;
 
     if (ctx == NULL)
@@ -180,9 +182,6 @@ int genpkey_main(int argc, char **argv)
         BIO_puts(bio_err, "Error getting password\n");
         goto end;
     }
-
-    if (!app_load_modules(NULL))
-        goto end;
 
     out = bio_open_owner(outfile, outformat, private);
     if (out == NULL)
@@ -272,7 +271,7 @@ static int init_keygen_file(EVP_PKEY_CTX **pctx, const char *file, ENGINE *e)
     }
 
     ctx = EVP_PKEY_CTX_new(pkey, e);
-    if (!ctx)
+    if (ctx == NULL)
         goto err;
     if (EVP_PKEY_keygen_init(ctx) <= 0)
         goto err;
@@ -318,8 +317,7 @@ int init_gen_str(EVP_PKEY_CTX **pctx,
 
     EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL, ameth);
 #ifndef OPENSSL_NO_ENGINE
-    if (tmpeng)
-        ENGINE_finish(tmpeng);
+    ENGINE_finish(tmpeng);
 #endif
     ctx = EVP_PKEY_CTX_new_id(pkey_id, e);
 

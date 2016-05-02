@@ -33,8 +33,8 @@
 # improvement on Cortex A8 core and ~21.5 cycles per byte.
 
 $flavour = shift;
-if ($flavour=~/^\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
-else { while (($output=shift) && ($output!~/^\w[\w\-]*\.\w+$/)) {} }
+if ($flavour=~/\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
+else { while (($output=shift) && ($output!~/\w[\w\-]*\.\w+$/)) {} }
 
 if ($flavour && $flavour ne "void") {
     $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
@@ -75,6 +75,7 @@ $code=<<___;
 .thumb
 #else
 .code	32
+#undef __thumb2__
 #endif
 
 .type	AES_Te,%object
@@ -766,7 +767,7 @@ _armv4_AES_set_enc2dec_key:
 	ldr	$rounds,[r0,#240]
 	mov	$i1,r0			@ input
 	add	$i2,r0,$rounds,lsl#4
-	mov	$key,r1			@ ouput
+	mov	$key,r1			@ output
 	add	$tbl,r1,$rounds,lsl#4
 	str	$rounds,[r1,#240]
 

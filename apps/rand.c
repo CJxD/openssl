@@ -121,13 +121,8 @@ int rand_main(int argc, char **argv)
     argc = opt_num_rest();
     argv = opt_rest();
 
-    if (argc != 1)
+    if (argc != 1 || !opt_int(argv[0], &num) || num < 0)
         goto opthelp;
-    if (sscanf(argv[0], "%d", &num) != 1 || num < 0)
-        goto opthelp;
-
-    if (!app_load_modules(NULL))
-        goto end;
 
     app_RAND_load_file(NULL, (inrand != NULL));
     if (inrand != NULL)

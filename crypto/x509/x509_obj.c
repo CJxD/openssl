@@ -1,4 +1,3 @@
-/* crypto/x509/x509_obj.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -64,6 +63,13 @@
 #include <openssl/buffer.h>
 #include "internal/x509_int.h"
 
+/*
+ * Limit to ensure we don't overflow: much greater than
+ * anything enountered in practice.
+ */
+
+#define NAME_ONELINE_MAX    (1024 * 1024)
+
 char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
 {
     X509_NAME_ENTRY *ne;
@@ -77,7 +83,7 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
     int gs_doit[4];
     char tmp_buf[80];
 #ifdef CHARSET_EBCDIC
-    char ebcdic_buf[1024];
+    unsigned char ebcdic_buf[1024];
 #endif
 
     if (buf == NULL) {
@@ -87,6 +93,8 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
             goto err;
         b->data[0] = '\0';
         len = 200;
+    } else if (len == 0) {
+        return NULL;
     }
     if (a == NULL) {
         if (b) {
@@ -111,6 +119,10 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
 
         type = ne->value->type;
         num = ne->value->length;
+        if (num > NAME_ONELINE_MAX) {
+            X509err(X509_F_X509_NAME_ONELINE, X509_R_NAME_TOO_LONG);
+            goto end;
+        }
         q = ne->value->data;
 #ifdef CHARSET_EBCDIC
         if (type == V_ASN1_GENERALSTRING ||
@@ -118,8 +130,8 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
             type == V_ASN1_PRINTABLESTRING ||
             type == V_ASN1_TELETEXSTRING ||
             type == V_ASN1_VISIBLESTRING || type == V_ASN1_IA5STRING) {
-            ascii2ebcdic(ebcdic_buf, q, (num > sizeof ebcdic_buf)
-                         ? sizeof ebcdic_buf : num);
+            ascii2ebcdic(ebcdic_buf, q, (num > (int)sizeof(ebcdic_buf))
+                         ? (int)sizeof(ebcdic_buf) : num);
             q = ebcdic_buf;
         }
 #endif
@@ -155,6 +167,10 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
 
         lold = l;
         l += 1 + l1 + 1 + l2;
+        if (l > NAME_ONELINE_MAX) {
+            X509err(X509_F_X509_NAME_ONELINE, X509_R_NAME_TOO_LONG);
+            goto end;
+        }
         if (b != NULL) {
             if (!BUF_MEM_grow(b, l + 1))
                 goto err;
@@ -207,6 +223,7 @@ char *X509_NAME_oneline(X509_NAME *a, char *buf, int len)
     return (p);
  err:
     X509err(X509_F_X509_NAME_ONELINE, ERR_R_MALLOC_FAILURE);
+ end:
     BUF_MEM_free(b);
     return (NULL);
 }

@@ -1,4 +1,3 @@
-/* dsa_asn1.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -59,36 +58,28 @@
 
 #include <stdio.h>
 #include "internal/cryptlib.h"
-#include <openssl/dsa.h>
+#include "dsa_locl.h"
 #include <openssl/asn1.h>
 #include <openssl/asn1t.h>
 #include <openssl/rand.h>
 
-/* Override the default new methods */
-static int sig_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
-                  void *exarg)
-{
-    if (operation == ASN1_OP_NEW_PRE) {
-        DSA_SIG *sig;
-        sig = OPENSSL_malloc(sizeof(*sig));
-        if (!sig) {
-            DSAerr(DSA_F_SIG_CB, ERR_R_MALLOC_FAILURE);
-            return 0;
-        }
-        sig->r = NULL;
-        sig->s = NULL;
-        *pval = (ASN1_VALUE *)sig;
-        return 2;
-    }
-    return 1;
-}
+struct DSA_SIG_st {
+    BIGNUM *r;
+    BIGNUM *s;
+};
 
-ASN1_SEQUENCE_cb(DSA_SIG, sig_cb) = {
+ASN1_SEQUENCE(DSA_SIG) = {
         ASN1_SIMPLE(DSA_SIG, r, CBIGNUM),
         ASN1_SIMPLE(DSA_SIG, s, CBIGNUM)
-} static_ASN1_SEQUENCE_END_cb(DSA_SIG, DSA_SIG)
+} static_ASN1_SEQUENCE_END(DSA_SIG)
 
 IMPLEMENT_ASN1_FUNCTIONS_const(DSA_SIG)
+
+void DSA_SIG_get0(BIGNUM **pr, BIGNUM **ps, const DSA_SIG *sig)
+{
+    *pr = sig->r;
+    *ps = sig->s;
+}
 
 /* Override the default free and new methods */
 static int dsa_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
@@ -96,7 +87,7 @@ static int dsa_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
 {
     if (operation == ASN1_OP_NEW_PRE) {
         *pval = (ASN1_VALUE *)DSA_new();
-        if (*pval)
+        if (*pval != NULL)
             return 2;
         return 0;
     } else if (operation == ASN1_OP_FREE_PRE) {
@@ -126,18 +117,12 @@ ASN1_SEQUENCE_cb(DSAparams, dsa_cb) = {
 
 IMPLEMENT_ASN1_ENCODE_FUNCTIONS_const_fname(DSA, DSAparams, DSAparams)
 
-/*
- * DSA public key is a bit trickier... its effectively a CHOICE type decided
- * by a field called write_params which can either write out just the public
- * key as an INTEGER or the parameters and public key in a SEQUENCE
- */
-
-ASN1_SEQUENCE(DSAPublicKey) = {
+ASN1_SEQUENCE_cb(DSAPublicKey, dsa_cb) = {
         ASN1_SIMPLE(DSA, pub_key, BIGNUM),
         ASN1_SIMPLE(DSA, p, BIGNUM),
         ASN1_SIMPLE(DSA, q, BIGNUM),
         ASN1_SIMPLE(DSA, g, BIGNUM)
-} static_ASN1_SEQUENCE_END_name(DSA, DSAPublicKey)
+} static_ASN1_SEQUENCE_END_cb(DSA, DSAPublicKey)
 
 IMPLEMENT_ASN1_ENCODE_FUNCTIONS_const_fname(DSA, DSAPublicKey, DSAPublicKey)
 

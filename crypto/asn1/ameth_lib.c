@@ -60,10 +60,9 @@
 #include "internal/cryptlib.h"
 #include <openssl/asn1t.h>
 #include <openssl/x509.h>
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
+#include <openssl/engine.h>
 #include "internal/asn1_int.h"
+#include "internal/evp_int.h"
 
 /* Keep this sorted in type order !! */
 static const EVP_PKEY_ASN1_METHOD *standard_methods[] = {
@@ -85,14 +84,15 @@ static const EVP_PKEY_ASN1_METHOD *standard_methods[] = {
     &eckey_asn1_meth,
 #endif
     &hmac_asn1_meth,
+#ifndef OPENSSL_NO_CMAC
     &cmac_asn1_meth,
+#endif
 #ifndef OPENSSL_NO_DH
     &dhx_asn1_meth
 #endif
 };
 
 typedef int sk_cmp_fn_type(const char *const *a, const char *const *b);
-DECLARE_STACK_OF(EVP_PKEY_ASN1_METHOD)
 static STACK_OF(EVP_PKEY_ASN1_METHOD) *app_methods = NULL;
 
 #ifdef TEST
@@ -224,7 +224,7 @@ int EVP_PKEY_asn1_add0(const EVP_PKEY_ASN1_METHOD *ameth)
 {
     if (app_methods == NULL) {
         app_methods = sk_EVP_PKEY_ASN1_METHOD_new(ameth_cmp);
-        if (!app_methods)
+        if (app_methods == NULL)
             return 0;
     }
     if (!sk_EVP_PKEY_ASN1_METHOD_push(app_methods, ameth))
@@ -237,7 +237,7 @@ int EVP_PKEY_asn1_add_alias(int to, int from)
 {
     EVP_PKEY_ASN1_METHOD *ameth;
     ameth = EVP_PKEY_asn1_new(from, ASN1_PKEY_ALIAS, NULL, NULL);
-    if (!ameth)
+    if (ameth == NULL)
         return 0;
     ameth->pkey_base_id = to;
     if (!EVP_PKEY_asn1_add0(ameth)) {
@@ -277,7 +277,7 @@ EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_new(int id, int flags,
 {
     EVP_PKEY_ASN1_METHOD *ameth = OPENSSL_zalloc(sizeof(*ameth));
 
-    if (!ameth)
+    if (ameth == NULL)
         return NULL;
 
     ameth->pkey_id = id;
@@ -285,13 +285,13 @@ EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_new(int id, int flags,
     ameth->pkey_flags = flags | ASN1_PKEY_DYNAMIC;
 
     if (info) {
-        ameth->info = BUF_strdup(info);
+        ameth->info = OPENSSL_strdup(info);
         if (!ameth->info)
             goto err;
     }
 
     if (pem_str) {
-        ameth->pem_str = BUF_strdup(pem_str);
+        ameth->pem_str = OPENSSL_strdup(pem_str);
         if (!ameth->pem_str)
             goto err;
     }

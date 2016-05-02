@@ -1,4 +1,3 @@
-/* v3_lib.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -155,7 +154,9 @@ static const X509V3_EXT_METHOD *standard_exts[] = {
 #ifndef OPENSSL_NO_CT
     &v3_ct_scts[0],
     &v3_ct_scts[1],
+    &v3_ct_scts[2],
 #endif
+    &v3_tls_feature,
 };
 
 /* Number of standard extensions */

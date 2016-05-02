@@ -1,4 +1,3 @@
-/* crypto/bio/bss_bio.c  -*- Mode: C; c-file-style: "eay" -*- */
 /* ====================================================================
  * Copyright (c) 1998-2003 The OpenSSL Project.  All rights reserved.
  *
@@ -61,38 +60,16 @@
  * See ssl/ssltest.c for some hints on how this can be used.
  */
 
-/* BIO_DEBUG implies BIO_PAIR_DEBUG */
-#ifdef BIO_DEBUG
-# ifndef BIO_PAIR_DEBUG
-#  define BIO_PAIR_DEBUG
-# endif
-#endif
-
-/* disable assert() unless BIO_PAIR_DEBUG has been defined */
-#ifndef BIO_PAIR_DEBUG
-# ifndef NDEBUG
-#  define NDEBUG
-# endif
-#endif
-
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <openssl/bio.h>
+#include "bio_lcl.h"
 #include <openssl/err.h>
 #include <openssl/crypto.h>
 
 #include "e_os.h"
-
-/* VxWorks defines SSIZE_MAX with an empty value causing compile errors */
-#if defined(OPENSSL_SYS_VXWORKS)
-# undef SSIZE_MAX
-#endif
-#ifndef SSIZE_MAX
-# define SSIZE_MAX INT_MAX
-#endif
 
 static int bio_new(BIO *bio);
 static int bio_free(BIO *bio);
@@ -104,7 +81,7 @@ static int bio_puts(BIO *bio, const char *str);
 static int bio_make_pair(BIO *bio1, BIO *bio2);
 static void bio_destroy_pair(BIO *bio);
 
-static BIO_METHOD methods_biop = {
+static const BIO_METHOD methods_biop = {
     BIO_TYPE_BIO,
     "BIO pair",
     bio_write,
@@ -117,7 +94,7 @@ static BIO_METHOD methods_biop = {
     NULL                        /* no bio_callback_ctrl */
 };
 
-BIO_METHOD *BIO_s_bio(void)
+const BIO_METHOD *BIO_s_bio(void)
 {
     return &methods_biop;
 }
@@ -309,8 +286,8 @@ static ossl_ssize_t bio_nread(BIO *bio, char **buf, size_t num_)
     struct bio_bio_st *b, *peer_b;
     ossl_ssize_t num, available;
 
-    if (num_ > SSIZE_MAX)
-        num = SSIZE_MAX;
+    if (num_ > OSSL_SSIZE_MAX)
+        num = OSSL_SSIZE_MAX;
     else
         num = (ossl_ssize_t) num_;
 
@@ -465,8 +442,8 @@ static ossl_ssize_t bio_nwrite(BIO *bio, char **buf, size_t num_)
     struct bio_bio_st *b;
     ossl_ssize_t num, space;
 
-    if (num_ > SSIZE_MAX)
-        num = SSIZE_MAX;
+    if (num_ > OSSL_SSIZE_MAX)
+        num = OSSL_SSIZE_MAX;
     else
         num = (ossl_ssize_t) num_;
 

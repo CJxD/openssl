@@ -1,4 +1,3 @@
-/* crypto/x509/x509type.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -71,14 +70,14 @@ int X509_certificate_type(X509 *x, EVP_PKEY *pkey)
         return (0);
 
     if (pkey == NULL)
-        pk = X509_get_pubkey(x);
+        pk = X509_get0_pubkey(x);
     else
         pk = pkey;
 
     if (pk == NULL)
         return (0);
 
-    switch (pk->type) {
+    switch (EVP_PKEY_id(pk)) {
     case EVP_PKEY_RSA:
         ret = EVP_PK_RSA | EVP_PKT_SIGN;
 /*              if (!sign only extension) */
@@ -94,6 +93,8 @@ int X509_certificate_type(X509 *x, EVP_PKEY *pkey)
         ret = EVP_PK_DH | EVP_PKT_EXCH;
         break;
     case NID_id_GostR3410_2001:
+    case NID_id_GostR3410_2012_256:
+    case NID_id_GostR3410_2012_512:
         ret = EVP_PKT_EXCH | EVP_PKT_SIGN;
         break;
     default:
@@ -120,7 +121,5 @@ int X509_certificate_type(X509 *x, EVP_PKEY *pkey)
         }
     }
 
-    if (pkey == NULL)
-        EVP_PKEY_free(pk);
     return (ret);
 }

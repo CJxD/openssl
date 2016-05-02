@@ -68,6 +68,8 @@
 # include <stdlib.h>
 # include <unixlib.h>
 
+# include "apps.h"
+
 /* Global storage. */
 
 /* Flag to sense if decc_init() was called. */
@@ -102,6 +104,7 @@ decc_feat_t decc_feat_array[] = {
     /* List terminator. */
     {(char *)NULL, 0}
 };
+
 
 char **copy_argv(int *argc, char *argv[])
 {

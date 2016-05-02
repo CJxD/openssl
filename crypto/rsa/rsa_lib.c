@@ -1,4 +1,3 @@
-/* crypto/rsa/rsa_lib.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -61,11 +60,9 @@
 #include "internal/cryptlib.h"
 #include <openssl/lhash.h>
 #include "internal/bn_int.h"
-#include <openssl/rsa.h>
 #include <openssl/rand.h>
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
+#include <openssl/engine.h>
+#include "rsa_locl.h"
 
 static const RSA_METHOD *default_RSA_meth = NULL;
 
@@ -87,7 +84,7 @@ const RSA_METHOD *RSA_get_default_method(void)
 #ifdef RSA_NULL
         default_RSA_meth = RSA_null_method();
 #else
-        default_RSA_meth = RSA_PKCS1_SSLeay();
+        default_RSA_meth = RSA_PKCS1_OpenSSL();
 #endif
     }
 
@@ -110,10 +107,8 @@ int RSA_set_method(RSA *rsa, const RSA_METHOD *meth)
     if (mtmp->finish)
         mtmp->finish(rsa);
 #ifndef OPENSSL_NO_ENGINE
-    if (rsa->engine) {
-        ENGINE_finish(rsa->engine);
-        rsa->engine = NULL;
-    }
+    ENGINE_finish(rsa->engine);
+    rsa->engine = NULL;
 #endif
     rsa->meth = meth;
     if (meth->init)
@@ -144,7 +139,7 @@ RSA *RSA_new_method(ENGINE *engine)
         ret->engine = ENGINE_get_default_RSA();
     if (ret->engine) {
         ret->meth = ENGINE_get_RSA(ret->engine);
-        if (!ret->meth) {
+        if (ret->meth == NULL) {
             RSAerr(RSA_F_RSA_NEW_METHOD, ERR_R_ENGINE_LIB);
             ENGINE_finish(ret->engine);
             OPENSSL_free(ret);
@@ -157,23 +152,28 @@ RSA *RSA_new_method(ENGINE *engine)
     ret->flags = ret->meth->flags & ~RSA_FLAG_NON_FIPS_ALLOW;
     if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_RSA, ret, &ret->ex_data)) {
 #ifndef OPENSSL_NO_ENGINE
-        if (ret->engine)
-            ENGINE_finish(ret->engine);
+        ENGINE_finish(ret->engine);
 #endif
         OPENSSL_free(ret);
-        return (NULL);
+        return NULL;
     }
 
-    if ((ret->meth->init != NULL) && !ret->meth->init(ret)) {
+    ret->lock = CRYPTO_THREAD_lock_new();
+    if (ret->lock == NULL) {
 #ifndef OPENSSL_NO_ENGINE
-        if (ret->engine)
-            ENGINE_finish(ret->engine);
+        ENGINE_finish(ret->engine);
 #endif
         CRYPTO_free_ex_data(CRYPTO_EX_INDEX_RSA, ret, &ret->ex_data);
         OPENSSL_free(ret);
+        return NULL;
+    }
+
+    if ((ret->meth->init != NULL) && !ret->meth->init(ret)) {
+        RSA_free(ret);
         ret = NULL;
     }
-    return (ret);
+
+    return ret;
 }
 
 void RSA_free(RSA *r)
@@ -183,27 +183,21 @@ void RSA_free(RSA *r)
     if (r == NULL)
         return;
 
-    i = CRYPTO_add(&r->references, -1, CRYPTO_LOCK_RSA);
-#ifdef REF_PRINT
-    REF_PRINT("RSA", r);
-#endif
+    CRYPTO_atomic_add(&r->references, -1, &i, r->lock);
+    REF_PRINT_COUNT("RSA", r);
     if (i > 0)
         return;
-#ifdef REF_CHECK
-    if (i < 0) {
-        fprintf(stderr, "RSA_free, bad reference count\n");
-        abort();
-    }
-#endif
+    REF_ASSERT_ISNT(i < 0);
 
     if (r->meth->finish)
         r->meth->finish(r);
 #ifndef OPENSSL_NO_ENGINE
-    if (r->engine)
-        ENGINE_finish(r->engine);
+    ENGINE_finish(r->engine);
 #endif
 
     CRYPTO_free_ex_data(CRYPTO_EX_INDEX_RSA, r, &r->ex_data);
+
+    CRYPTO_THREAD_lock_free(r->lock);
 
     BN_clear_free(r->n);
     BN_clear_free(r->e);
@@ -221,24 +215,14 @@ void RSA_free(RSA *r)
 
 int RSA_up_ref(RSA *r)
 {
-    int i = CRYPTO_add(&r->references, 1, CRYPTO_LOCK_RSA);
-#ifdef REF_PRINT
-    REF_PRINT("RSA", r);
-#endif
-#ifdef REF_CHECK
-    if (i < 2) {
-        fprintf(stderr, "RSA_up_ref, bad reference count\n");
-        abort();
-    }
-#endif
-    return ((i > 1) ? 1 : 0);
-}
+    int i;
 
-int RSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                         CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_RSA, argl, argp,
-                                   new_func, dup_func, free_func);
+    if (CRYPTO_atomic_add(&r->references, 1, &i, r->lock) <= 0)
+        return 0;
+
+    REF_PRINT_COUNT("RSA", r);
+    REF_ASSERT_ISNT(i < 2);
+    return ((i > 1) ? 1 : 0);
 }
 
 int RSA_set_ex_data(RSA *r, int idx, void *arg)
@@ -298,4 +282,132 @@ int RSA_memory_lock(RSA *r)
 int RSA_security_bits(const RSA *rsa)
 {
     return BN_security_bits(BN_num_bits(rsa->n), -1);
+}
+
+int RSA_set0_key(RSA *r, BIGNUM *n, BIGNUM *e, BIGNUM *d)
+{
+    /* If the fields in r are NULL, the corresponding input
+     * parameters MUST be non-NULL for n and e.  d may be
+     * left NULL (in case only the public key is used).
+     *
+     * It is an error to give the results from get0 on r
+     * as input parameters.
+     */
+    if (n == r->n || e == r->e
+        || (r->d != NULL && d == r->d))
+        return 0;
+
+    if (n != NULL) {
+        BN_free(r->n);
+        r->n = n;
+    }
+    if (e != NULL) {
+        BN_free(r->e);
+        r->e = e;
+    }
+    if (d != NULL) {
+        BN_free(r->d);
+        r->d = d;
+    }
+
+    return 1;
+}
+
+int RSA_set0_factors(RSA *r, BIGNUM *p, BIGNUM *q)
+{
+    /* If the fields in r are NULL, the corresponding input
+     * parameters MUST be non-NULL.
+     *
+     * It is an error to give the results from get0 on r
+     * as input parameters.
+     */
+    if (p == r->p || q == r->q)
+        return 0;
+
+    if (p != NULL) {
+        BN_free(r->p);
+        r->p = p;
+    }
+    if (q != NULL) {
+        BN_free(r->q);
+        r->q = q;
+    }
+
+    return 1;
+}
+
+int RSA_set0_crt_params(RSA *r, BIGNUM *dmp1, BIGNUM *dmq1, BIGNUM *iqmp)
+{
+    /* If the fields in r are NULL, the corresponding input
+     * parameters MUST be non-NULL.
+     *
+     * It is an error to give the results from get0 on r
+     * as input parameters.
+     */
+    if (dmp1 == r->dmp1 || dmq1 == r->dmq1 || iqmp == r->iqmp)
+        return 0;
+
+    if (dmp1 != NULL) {
+        BN_free(r->dmp1);
+        r->dmp1 = dmp1;
+    }
+    if (dmq1 != NULL) {
+        BN_free(r->dmq1);
+        r->dmq1 = dmq1;
+    }
+    if (iqmp != NULL) {
+        BN_free(r->iqmp);
+        r->iqmp = iqmp;
+    }
+
+    return 1;
+}
+
+void RSA_get0_key(const RSA *r, BIGNUM **n, BIGNUM **e, BIGNUM **d)
+{
+    if (n != NULL)
+        *n = r->n;
+    if (e != NULL)
+        *e = r->e;
+    if (d != NULL)
+        *d = r->d;
+}
+
+void RSA_get0_factors(const RSA *r, BIGNUM **p, BIGNUM **q)
+{
+    if (p != NULL)
+        *p = r->p;
+    if (q != NULL)
+        *q = r->q;
+}
+
+void RSA_get0_crt_params(const RSA *r,
+                         BIGNUM **dmp1, BIGNUM **dmq1, BIGNUM **iqmp)
+{
+    if (dmp1 != NULL)
+        *dmp1 = r->dmp1;
+    if (dmq1 != NULL)
+        *dmq1 = r->dmq1;
+    if (iqmp != NULL)
+        *iqmp = r->iqmp;
+}
+
+void RSA_clear_flags(RSA *r, int flags)
+{
+    r->flags &= ~flags;
+}
+
+int RSA_test_flags(const RSA *r, int flags)
+{
+    return r->flags & flags;
+}
+
+void RSA_set_flags(RSA *r, int flags)
+{
+    r->flags |= flags;
+}
+
+ENGINE *RSA_get0_engine(RSA *r)
+{
+    return r->engine;
 }

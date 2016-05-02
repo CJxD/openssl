@@ -1,4 +1,3 @@
-/* crypto/asn1/x_pkey.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -67,13 +66,12 @@ X509_PKEY *X509_PKEY_new(void)
     X509_PKEY *ret = NULL;
 
     ret = OPENSSL_zalloc(sizeof(*ret));
-    if (!ret)
+    if (ret == NULL)
         goto err;
 
-    ret->references = 1;
     ret->enc_algor = X509_ALGOR_new();
     ret->enc_pkey = ASN1_OCTET_STRING_new();
-    if (!ret->enc_algor || !ret->enc_pkey)
+    if (ret->enc_algor == NULL || ret->enc_pkey == NULL)
         goto err;
 
     return ret;
@@ -85,23 +83,8 @@ err:
 
 void X509_PKEY_free(X509_PKEY *x)
 {
-    int i;
-
     if (x == NULL)
         return;
-
-    i = CRYPTO_add(&x->references, -1, CRYPTO_LOCK_X509_PKEY);
-#ifdef REF_PRINT
-    REF_PRINT("X509_PKEY", x);
-#endif
-    if (i > 0)
-        return;
-#ifdef REF_CHECK
-    if (i < 0) {
-        fprintf(stderr, "X509_PKEY_free, bad reference count\n");
-        abort();
-    }
-#endif
 
     X509_ALGOR_free(x->enc_algor);
     ASN1_OCTET_STRING_free(x->enc_pkey);

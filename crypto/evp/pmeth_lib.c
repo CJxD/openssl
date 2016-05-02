@@ -1,4 +1,3 @@
-/* pmeth_lib.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2006.
@@ -60,15 +59,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "internal/cryptlib.h"
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
+#include <openssl/engine.h>
+#include <openssl/evp.h>
+#include <openssl/x509v3.h>
 #include "internal/asn1_int.h"
 #include "internal/evp_int.h"
+#include "internal/numbers.h"
 
 typedef int sk_cmp_fn_type(const char *const *a, const char *const *b);
 
-DECLARE_STACK_OF(EVP_PKEY_METHOD)
 static STACK_OF(EVP_PKEY_METHOD) *app_pkey_methods = NULL;
 
 static const EVP_PKEY_METHOD *standard_methods[] = {
@@ -85,10 +84,14 @@ static const EVP_PKEY_METHOD *standard_methods[] = {
     &ec_pkey_meth,
 #endif
     &hmac_pkey_meth,
+#ifndef OPENSSL_NO_CMAC
     &cmac_pkey_meth,
-#ifndef OPENSSL_NO_DH
-    &dhx_pkey_meth
 #endif
+#ifndef OPENSSL_NO_DH
+    &dhx_pkey_meth,
+#endif
+    &tls1_prf_pkey_meth,
+    &hkdf_pkey_meth
 };
 
 DECLARE_OBJ_BSEARCH_CMP_FN(const EVP_PKEY_METHOD *, const EVP_PKEY_METHOD *,
@@ -144,7 +147,7 @@ static EVP_PKEY_CTX *int_ctx_new(EVP_PKEY *pkey, ENGINE *e, int id)
         e = ENGINE_get_pkey_meth_engine(id);
 
     /*
-     * If an ENGINE handled this method look it up. Othewise use internal
+     * If an ENGINE handled this method look it up. Otherwise use internal
      * tables.
      */
 
@@ -160,10 +163,9 @@ static EVP_PKEY_CTX *int_ctx_new(EVP_PKEY *pkey, ENGINE *e, int id)
     }
 
     ret = OPENSSL_zalloc(sizeof(*ret));
-    if (!ret) {
+    if (ret == NULL) {
 #ifndef OPENSSL_NO_ENGINE
-        if (e)
-            ENGINE_finish(e);
+        ENGINE_finish(e);
 #endif
         EVPerr(EVP_F_INT_CTX_NEW, ERR_R_MALLOC_FAILURE);
         return NULL;
@@ -173,7 +175,7 @@ static EVP_PKEY_CTX *int_ctx_new(EVP_PKEY *pkey, ENGINE *e, int id)
     ret->operation = EVP_PKEY_OP_UNDEFINED;
     ret->pkey = pkey;
     if (pkey)
-        CRYPTO_add(&pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+        EVP_PKEY_up_ref(pkey);
 
     if (pmeth->init) {
         if (pmeth->init(ret) <= 0) {
@@ -190,7 +192,7 @@ EVP_PKEY_METHOD *EVP_PKEY_meth_new(int id, int flags)
     EVP_PKEY_METHOD *pmeth;
 
     pmeth = OPENSSL_zalloc(sizeof(*pmeth));
-    if (!pmeth)
+    if (pmeth == NULL)
         return NULL;
 
     pmeth->pkey_id = id;
@@ -277,7 +279,7 @@ EVP_PKEY_CTX *EVP_PKEY_CTX_dup(EVP_PKEY_CTX *pctx)
     }
 #endif
     rctx = OPENSSL_malloc(sizeof(*rctx));
-    if (!rctx)
+    if (rctx == NULL)
         return NULL;
 
     rctx->pmeth = pctx->pmeth;
@@ -286,12 +288,12 @@ EVP_PKEY_CTX *EVP_PKEY_CTX_dup(EVP_PKEY_CTX *pctx)
 #endif
 
     if (pctx->pkey)
-        CRYPTO_add(&pctx->pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+        EVP_PKEY_up_ref(pctx->pkey);
 
     rctx->pkey = pctx->pkey;
 
     if (pctx->peerkey)
-        CRYPTO_add(&pctx->peerkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+        EVP_PKEY_up_ref(pctx->peerkey);
 
     rctx->peerkey = pctx->peerkey;
 
@@ -311,7 +313,7 @@ int EVP_PKEY_meth_add0(const EVP_PKEY_METHOD *pmeth)
 {
     if (app_pkey_methods == NULL) {
         app_pkey_methods = sk_EVP_PKEY_METHOD_new(pmeth_cmp);
-        if (!app_pkey_methods)
+        if (app_pkey_methods == NULL)
             return 0;
     }
     if (!sk_EVP_PKEY_METHOD_push(app_pkey_methods, pmeth))
@@ -329,12 +331,7 @@ void EVP_PKEY_CTX_free(EVP_PKEY_CTX *ctx)
     EVP_PKEY_free(ctx->pkey);
     EVP_PKEY_free(ctx->peerkey);
 #ifndef OPENSSL_NO_ENGINE
-    if (ctx->engine)
-        /*
-         * The EVP_PKEY_CTX we used belongs to an ENGINE, release the
-         * functional reference we held for this reason.
-         */
-        ENGINE_finish(ctx->engine);
+    ENGINE_finish(ctx->engine);
 #endif
     OPENSSL_free(ctx);
 }
@@ -385,6 +382,33 @@ int EVP_PKEY_CTX_ctrl_str(EVP_PKEY_CTX *ctx,
         return EVP_PKEY_CTX_set_signature_md(ctx, md);
     }
     return ctx->pmeth->ctrl_str(ctx, name, value);
+}
+
+/* Utility functions to send a string of hex string to a ctrl */
+
+int EVP_PKEY_CTX_str2ctrl(EVP_PKEY_CTX *ctx, int cmd, const char *str)
+{
+    size_t len;
+
+    len = strlen(str);
+    if (len > INT_MAX)
+        return -1;
+    return ctx->pmeth->ctrl(ctx, cmd, len, (void *)str);
+}
+
+int EVP_PKEY_CTX_hex2ctrl(EVP_PKEY_CTX *ctx, int cmd, const char *hex)
+{
+    unsigned char *bin;
+    long binlen;
+    int rv = -1;
+
+    bin = OPENSSL_hexstr2buf(hex, &binlen);
+    if (bin == NULL)
+        return 0;
+    if (binlen <= INT_MAX)
+        rv = ctx->pmeth->ctrl(ctx, cmd, binlen, bin);
+    OPENSSL_free(bin);
+    return rv;
 }
 
 int EVP_PKEY_CTX_get_operation(EVP_PKEY_CTX *ctx)

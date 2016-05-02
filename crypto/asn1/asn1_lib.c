@@ -1,4 +1,3 @@
-/* crypto/asn1/asn1_lib.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -62,7 +61,7 @@
 #include <openssl/asn1.h>
 
 static int asn1_get_length(const unsigned char **pp, int *inf, long *rl,
-                           int max);
+                           long max);
 static void asn1_put_length(unsigned char **pp, int length);
 
 static int _asn1_check_infinite_end(const unsigned char **p, long len)
@@ -129,7 +128,7 @@ int ASN1_get_object(const unsigned char **pp, long *plength, int *ptag,
     }
     *ptag = tag;
     *pclass = xclass;
-    if (!asn1_get_length(&p, &inf, plength, (int)max))
+    if (!asn1_get_length(&p, &inf, plength, max))
         goto err;
 
     if (inf && !(ret & V_ASN1_CONSTRUCTED))
@@ -151,14 +150,14 @@ int ASN1_get_object(const unsigned char **pp, long *plength, int *ptag,
 }
 
 static int asn1_get_length(const unsigned char **pp, int *inf, long *rl,
-                           int max)
+                           long max)
 {
     const unsigned char *p = *pp;
     unsigned long ret = 0;
-    unsigned int i;
+    unsigned long i;
 
     if (max-- < 1)
-        return (0);
+        return 0;
     if (*p == 0x80) {
         *inf = 1;
         ret = 0;
@@ -167,7 +166,7 @@ static int asn1_get_length(const unsigned char **pp, int *inf, long *rl,
         *inf = 0;
         i = *p & 0x7f;
         if (*(p++) & 0x80) {
-            if (max < (int)i)
+            if (max < (long)i + 1)
                 return 0;
             /* Skip leading zeroes */
             while (i && *p == 0) {
@@ -187,7 +186,7 @@ static int asn1_get_length(const unsigned char **pp, int *inf, long *rl,
         return 0;
     *pp = p;
     *rl = (long)ret;
-    return (1);
+    return 1;
 }
 
 /*
@@ -284,7 +283,9 @@ int ASN1_STRING_copy(ASN1_STRING *dst, const ASN1_STRING *str)
     dst->type = str->type;
     if (!ASN1_STRING_set(dst, str->data, str->length))
         return 0;
-    dst->flags = str->flags;
+    /* Copy flags but preserve embed value */
+    dst->flags &= ASN1_STRING_FLAG_EMBED;
+    dst->flags |= str->flags & ~ASN1_STRING_FLAG_EMBED;
     return 1;
 }
 
@@ -294,7 +295,7 @@ ASN1_STRING *ASN1_STRING_dup(const ASN1_STRING *str)
     if (!str)
         return NULL;
     ret = ASN1_STRING_new();
-    if (!ret)
+    if (ret == NULL)
         return NULL;
     if (!ASN1_STRING_copy(ret, str)) {
         ASN1_STRING_free(ret);
@@ -363,7 +364,8 @@ void ASN1_STRING_free(ASN1_STRING *a)
         return;
     if (!(a->flags & ASN1_STRING_FLAG_NDEF))
         OPENSSL_free(a->data);
-    OPENSSL_free(a);
+    if (!(a->flags & ASN1_STRING_FLAG_EMBED))
+        OPENSSL_free(a);
 }
 
 void ASN1_STRING_clear_free(ASN1_STRING *a)

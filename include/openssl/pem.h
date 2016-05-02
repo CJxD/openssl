@@ -1,4 +1,3 @@
-/* crypto/pem/pem.h */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -97,16 +96,6 @@ extern "C" {
 # define PEM_STRING_ECPRIVATEKEY "EC PRIVATE KEY"
 # define PEM_STRING_PARAMETERS   "PARAMETERS"
 # define PEM_STRING_CMS          "CMS"
-
-  /*
-   * Note that this structure is initialised by PEM_SealInit and cleaned up
-   * by PEM_SealFinal (at least for now)
-   */
-typedef struct PEM_Encode_Seal_st {
-    EVP_ENCODE_CTX encode;
-    EVP_MD_CTX md;
-    EVP_CIPHER_CTX cipher;
-} PEM_ENCODE_SEAL_CTX;
 
 # define PEM_TYPE_ENCRYPTED      10
 # define PEM_TYPE_MIC_ONLY       20
@@ -376,14 +365,6 @@ STACK_OF(X509_INFO) *PEM_X509_INFO_read(FILE *fp, STACK_OF(X509_INFO) *sk,
                                         pem_password_cb *cb, void *u);
 #endif
 
-int PEM_SealInit(PEM_ENCODE_SEAL_CTX *ctx, EVP_CIPHER *type,
-                 EVP_MD *md_type, unsigned char **ek, int *ekl,
-                 unsigned char *iv, EVP_PKEY **pubk, int npubk);
-int PEM_SealUpdate(PEM_ENCODE_SEAL_CTX *ctx, unsigned char *out, int *outl,
-                   unsigned char *in, int inl);
-int PEM_SealFinal(PEM_ENCODE_SEAL_CTX *ctx, unsigned char *sig, int *sigl,
-                  unsigned char *out, int *outl, EVP_PKEY *priv);
-
 int PEM_SignInit(EVP_MD_CTX *ctx, EVP_MD *type);
 int PEM_SignUpdate(EVP_MD_CTX *ctx, unsigned char *d, unsigned int cnt);
 int PEM_SignFinal(EVP_MD_CTX *ctx, unsigned char *sigret,
@@ -440,7 +421,7 @@ int i2d_PKCS8PrivateKey_nid_bio(BIO *bp, EVP_PKEY *x, int nid,
 EVP_PKEY *d2i_PKCS8PrivateKey_bio(BIO *bp, EVP_PKEY **x, pem_password_cb *cb,
                                   void *u);
 
-#ifndef OPENSSL_NO_STDIO
+# ifndef OPENSSL_NO_STDIO
 int i2d_PKCS8PrivateKey_fp(FILE *fp, EVP_PKEY *x, const EVP_CIPHER *enc,
                            char *kstr, int klen,
                            pem_password_cb *cb, void *u);
@@ -457,20 +438,22 @@ EVP_PKEY *d2i_PKCS8PrivateKey_fp(FILE *fp, EVP_PKEY **x, pem_password_cb *cb,
 int PEM_write_PKCS8PrivateKey(FILE *fp, EVP_PKEY *x, const EVP_CIPHER *enc,
                               char *kstr, int klen, pem_password_cb *cd,
                               void *u);
-#endif
+# endif
 EVP_PKEY *PEM_read_bio_Parameters(BIO *bp, EVP_PKEY **x);
 int PEM_write_bio_Parameters(BIO *bp, EVP_PKEY *x);
 
+# ifndef OPENSSL_NO_DSA
 EVP_PKEY *b2i_PrivateKey(const unsigned char **in, long length);
 EVP_PKEY *b2i_PublicKey(const unsigned char **in, long length);
 EVP_PKEY *b2i_PrivateKey_bio(BIO *in);
 EVP_PKEY *b2i_PublicKey_bio(BIO *in);
 int i2b_PrivateKey_bio(BIO *out, EVP_PKEY *pk);
 int i2b_PublicKey_bio(BIO *out, EVP_PKEY *pk);
-# ifndef OPENSSL_NO_RC4
+#  ifndef OPENSSL_NO_RC4
 EVP_PKEY *b2i_PVK_bio(BIO *in, pem_password_cb *cb, void *u);
 int i2b_PVK_bio(BIO *out, EVP_PKEY *pk, int enclevel,
                 pem_password_cb *cb, void *u);
+#  endif
 # endif
 
 /* BEGIN ERROR CODES */
@@ -516,8 +499,6 @@ void ERR_load_PEM_strings(void);
 # define PEM_F_PEM_READ_BIO_PRIVATEKEY                    123
 # define PEM_F_PEM_READ_DHPARAMS                          142
 # define PEM_F_PEM_READ_PRIVATEKEY                        124
-# define PEM_F_PEM_SEALFINAL                              110
-# define PEM_F_PEM_SEALINIT                               111
 # define PEM_F_PEM_SIGNFINAL                              112
 # define PEM_F_PEM_WRITE                                  113
 # define PEM_F_PEM_WRITE_BIO                              114

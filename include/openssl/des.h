@@ -1,4 +1,3 @@
-/* crypto/des/des.h */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -56,24 +55,23 @@
  * [including the GNU Public Licence.]
  */
 
-#ifndef HEADER_NEW_DES_H
-# define HEADER_NEW_DES_H
+#ifndef HEADER_DES_H
+# define HEADER_DES_H
 
-# include <openssl/e_os2.h>     /* OPENSSL_EXTERN, OPENSSL_NO_DES, DES_LONG
-                                 * (via openssl/opensslconf.h */
+# include <openssl/opensslconf.h>
 
-# ifdef OPENSSL_NO_DES
-#  error DES is disabled.
+# ifndef OPENSSL_NO_DES
+# ifdef  __cplusplus
+extern "C" {
 # endif
+# include <openssl/e_os2.h>
+
+typedef unsigned int DES_LONG;
 
 # ifdef OPENSSL_BUILD_SHLIBCRYPTO
 #  undef OPENSSL_EXTERN
 #  define OPENSSL_EXTERN OPENSSL_EXPORT
 # endif
-
-#ifdef  __cplusplus
-extern "C" {
-#endif
 
 typedef unsigned char DES_cblock[8];
 typedef /* const */ unsigned char const_DES_cblock[8];
@@ -220,14 +218,17 @@ void DES_ofb64_encrypt(const unsigned char *in, unsigned char *out,
                        long length, DES_key_schedule *schedule,
                        DES_cblock *ivec, int *num);
 
+#ifndef OPENSSL_NO_UI
 int DES_read_password(DES_cblock *key, const char *prompt, int verify);
 int DES_read_2passwords(DES_cblock *key1, DES_cblock *key2,
                         const char *prompt, int verify);
+#endif
 
 # define DES_fixup_key_parity DES_set_odd_parity
 
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
 
 #endif

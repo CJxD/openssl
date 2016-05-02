@@ -1,10 +1,8 @@
-/* crypto/ct/ct_locl.h */
 /*
- * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
- * 2015.
+ * Written by Rob Percival (robpercival@google.com) for the OpenSSL project.
  */
 /* ====================================================================
- * Copyright (c) 2015 The OpenSSL Project.  All rights reserved.
+ * Copyright (c) 2016 The OpenSSL Project.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,58 +48,68 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  * ====================================================================
- *
  */
-#ifndef HEADER_CT_LOCL_H
-# define HEADER_CT_LOCL_H
 
-# ifdef __cplusplus
-extern "C" {
-# endif
-
-# ifndef OPENSSL_NO_CT
-
-/* All hashes are currently SHA256 */
-#  define SCT_V1_HASHLEN  32
-/* Minimum RSA key size, from RFC6962 */
-#  define SCT_MIN_RSA_BITS 2048
+#include <stddef.h>
+#include <openssl/ct.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/safestack.h>
 
 /*
  * From RFC6962: opaque SerializedSCT<1..2^16-1>; struct { SerializedSCT
  * sct_list <1..2^16-1>; } SignedCertificateTimestampList;
  */
+# define MAX_SCT_SIZE            65535
+# define MAX_SCT_LIST_SIZE       MAX_SCT_SIZE
 
-#  define MAX_SCT_SIZE            65535
-#  define MAX_SCT_LIST_SIZE       MAX_SCT_SIZE
+/*
+ * Macros to read and write integers in network-byte order.
+ */
 
-typedef enum {
-    UNSET_ENTRY = -1,
-    X509_ENTRY = 0,
-    PRECERT_ENTRY = 1
-} log_entry_type_t;
+#define n2s(c,s)        ((s=(((unsigned int)((c)[0]))<< 8)| \
+                            (((unsigned int)((c)[1]))    )),c+=2)
 
-typedef enum {
-    UNSET_VERSION = -1,
-    SCT_V1 = 0
-} sct_version_t;
+#define s2n(s,c)        ((c[0]=(unsigned char)(((s)>> 8)&0xff), \
+                          c[1]=(unsigned char)(((s)    )&0xff)),c+=2)
 
-typedef struct {
+#define l2n3(l,c)       ((c[0]=(unsigned char)(((l)>>16)&0xff), \
+                          c[1]=(unsigned char)(((l)>> 8)&0xff), \
+                          c[2]=(unsigned char)(((l)    )&0xff)),c+=3)
+
+#define n2l8(c,l)       (l =((uint64_t)(*((c)++)))<<56, \
+                         l|=((uint64_t)(*((c)++)))<<48, \
+                         l|=((uint64_t)(*((c)++)))<<40, \
+                         l|=((uint64_t)(*((c)++)))<<32, \
+                         l|=((uint64_t)(*((c)++)))<<24, \
+                         l|=((uint64_t)(*((c)++)))<<16, \
+                         l|=((uint64_t)(*((c)++)))<< 8, \
+                         l|=((uint64_t)(*((c)++))))
+
+#define l2n8(l,c)       (*((c)++)=(unsigned char)(((l)>>56)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>48)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>40)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>32)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>24)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>>16)&0xff), \
+                         *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
+                         *((c)++)=(unsigned char)(((l)    )&0xff))
+
+/* Signed Certificate Timestamp */
+struct sct_st {
     sct_version_t version;
-    /* If version is not SCT_V1 this contains the encoded SCT */
+    /* If version is not SCT_VERSION_V1, this contains the encoded SCT */
     unsigned char *sct;
     size_t sct_len;
-    /*
-     * If version is SCT_V1 fields below contain components of the SCT. "logid",
-     * "ext" and "sig" point to buffers allocated with OPENSSL_malloc().
-     */
+    /* If version is SCT_VERSION_V1, fields below contain components of the SCT */
     unsigned char *log_id;
     size_t log_id_len;
-
     /*
-     * Note, we cannot distinguish between an unset timestamp, and one
-     * that is set to 0.  However since CT didn't exist in 1970, no real
-     * SCT should ever be set as such.
-     */
+    * Note, we cannot distinguish between an unset timestamp, and one
+    * that is set to 0.  However since CT didn't exist in 1970, no real
+    * SCT should ever be set as such.
+    */
     uint64_t timestamp;
     unsigned char *ext;
     size_t ext_len;
@@ -110,133 +118,97 @@ typedef struct {
     unsigned char *sig;
     size_t sig_len;
     /* Log entry type */
-    log_entry_type_t entry_type;
-} SCT;
+    ct_log_entry_type_t entry_type;
+    /* Where this SCT was found, e.g. certificate, OCSP response, etc. */
+    sct_source_t source;
+    /* The result of the last attempt to validate this SCT. */
+    sct_validation_status_t validation_status;
+};
 
-DECLARE_STACK_OF(SCT)
+/* Miscellaneous data that is useful when verifying an SCT  */
+struct sct_ctx_st {
+    /* Public key */
+    EVP_PKEY *pkey;
+    /* Hash of public key */
+    unsigned char *pkeyhash;
+    size_t pkeyhashlen;
+    /* For pre-certificate: issuer public key hash */
+    unsigned char *ihash;
+    size_t ihashlen;
+    /* certificate encoding */
+    unsigned char *certder;
+    size_t certderlen;
+    /* pre-certificate encoding */
+    unsigned char *preder;
+    size_t prederlen;
+};
 
-/*
- * Allocate new SCT.
- * Caller is responsible for calling SCT_free when done.
- */
-SCT *SCT_new(void);
-
-/*
- * Free SCT and underlying datastructures.
- */
-void SCT_free(SCT *sct);
-
-/*
- * Set the version of an SCT.
- * Returns 1 on success, 0 if the version is unrecognized.
- */
-int SCT_set_version(SCT *sct, sct_version_t version);
-
-/*
- * Set the log entry type of an SCT.
- * Returns 1 on success.
- */
-int SCT_set_log_entry_type(SCT *sct, log_entry_type_t entry_type);
-
-/*
- * Set the log id of an SCT to point directly to the *logid specified.
- * The SCT takes ownership of the specified pointer.
- * Returns 1 on success.
- */
-int SCT_set0_log_id(SCT *sct, unsigned char *log_id, size_t log_id_len);
+/* Context when evaluating whether a Certificate Transparency policy is met */
+struct ct_policy_eval_ctx_st {
+    X509 *cert;
+    X509 *issuer;
+    CTLOG_STORE *log_store;
+};
 
 /*
- * Set the timestamp of an SCT.
+ * Creates a new context for verifying an SCT.
  */
-void SCT_set_timestamp(SCT *sct, uint64_t timestamp);
+SCT_CTX *SCT_CTX_new(void);
+/*
+ * Deletes an SCT verification context.
+ */
+void SCT_CTX_free(SCT_CTX *sctx);
 
 /*
- * Set the signature type of an SCT
- * Currently NID_sha256WithRSAEncryption or NID_ecdsa_with_SHA256.
- * Returns 1 on success.
+ * Sets the certificate that the SCT was created for.
+ * If *cert does not have a poison extension, presigner must be NULL.
+ * If *cert does not have a poison extension, it may have a single SCT
+ * (NID_ct_precert_scts) extension.
+ * If either *cert or *presigner have an AKID (NID_authority_key_identifier)
+ * extension, both must have one.
+ * Returns 1 on success, 0 on failure.
  */
-int SCT_set_signature_nid(SCT *sct, int nid);
+__owur int SCT_CTX_set1_cert(SCT_CTX *sctx, X509 *cert, X509 *presigner);
 
 /*
- * Set the extensions of an SCT to point directly to the *ext specified.
- * The SCT takes ownership of the specified pointer.
+ * Sets the issuer of the certificate that the SCT was created for.
+ * This is just a convenience method to save extracting the public key and
+ * calling SCT_CTX_set1_issuer_pubkey().
+ * Issuer must not be NULL.
+ * Returns 1 on success, 0 on failure.
  */
-void SCT_set0_extensions(SCT *sct, unsigned char *ext, size_t ext_len);
+__owur int SCT_CTX_set1_issuer(SCT_CTX *sctx, const X509 *issuer);
 
 /*
- * Set the signature of an SCT to point directly to the *sig specified.
- * The SCT takes ownership of the specified pointer.
+ * Sets the public key of the issuer of the certificate that the SCT was created
+ * for.
+ * The public key must not be NULL.
+ * Returns 1 on success, 0 on failure.
  */
-void SCT_set0_signature(SCT *sct, unsigned char *sig, size_t sig_len);
+__owur int SCT_CTX_set1_issuer_pubkey(SCT_CTX *sctx, X509_PUBKEY *pubkey);
 
 /*
- * Returns the version of the SCT.
+ * Sets the public key of the CT log that the SCT is from.
+ * Returns 1 on success, 0 on failure.
  */
-sct_version_t SCT_get_version(const SCT *sct);
+__owur int SCT_CTX_set1_pubkey(SCT_CTX *sctx, X509_PUBKEY *pubkey);
 
 /*
- * Returns the log entry type of the SCT.
+ * Does this SCT have the minimum fields populated to be usable?
+ * Returns 1 if so, 0 otherwise.
  */
-log_entry_type_t SCT_get_log_entry_type(const SCT *sct);
+__owur int SCT_is_complete(const SCT *sct);
 
 /*
- * Set *logid to point to the log id for the SCT. logid must not be NULL.
- * The SCT retains ownership of this pointer.
- * Returns length of the data pointed to.
+ * Does this SCT have the signature-related fields populated?
+ * Returns 1 if so, 0 otherwise.
+ * This checks that the signature and hash algorithms are set to supported
+ * values and that the signature field is set.
  */
-size_t SCT_get0_log_id(const SCT *sct, unsigned char **log_id);
+__owur int SCT_signature_is_complete(const SCT *sct);
+
 
 /*
- * Returns the timestamp for the SCT.
+ * Handlers for Certificate Transparency X509v3/OCSP extensions
  */
-uint64_t SCT_get_timestamp(const SCT *sct);
-
-/*
- * Return the nid for the signature used by the SCT.
- * Currently NID_sha256WithRSAEncryption or NID_ecdsa_with_SHA256 (or NID_undef)
- */
-int SCT_get_signature_nid(const SCT *sct);
-
-/*
- * Set *ext to point to the extension data for the SCT. ext must not be NULL.
- * The SCT retains ownership of this pointer.
- * Returns length of the data pointed to.
- */
-size_t SCT_get0_extensions(const SCT *sct, unsigned char **ext);
-
-/*
- * Set *sig to point to the signature for the SCT. sig must not be NULL.
- * The SCT retains ownership of this pointer.
- * Returns length of the data pointed to.
- */
-size_t SCT_get0_signature(const SCT *sct, unsigned char **sig);
-
-
-# endif
-
-/* BEGIN ERROR CODES */
-/*
- * The following lines are auto generated by the script mkerr.pl. Any changes
- * made after this point may be overwritten when the script is next run.
- */
-void ERR_load_CT_strings(void);
-
-/* Error codes for the CT functions. */
-
-/* Function codes. */
-# define CT_F_SCT_NEW                                     100
-# define CT_F_SCT_SET0_LOG_ID                             101
-# define CT_F_SCT_SET_LOG_ENTRY_TYPE                      102
-# define CT_F_SCT_SET_SIGNATURE_NID                       103
-# define CT_F_SCT_SET_VERSION                             104
-
-/* Reason codes. */
-# define CT_R_INVALID_LOG_ID_LENGTH                       100
-# define CT_R_UNRECOGNIZED_SIGNATURE_NID                  101
-# define CT_R_UNSUPPORTED_ENTRY_TYPE                      102
-# define CT_R_UNSUPPORTED_VERSION                         103
-
-#ifdef  __cplusplus
-}
-#endif
-#endif
+extern const X509V3_EXT_METHOD v3_ct_scts[];

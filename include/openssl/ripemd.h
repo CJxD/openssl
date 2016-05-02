@@ -1,4 +1,3 @@
-/* crypto/ripemd/ripemd.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,15 +58,13 @@
 #ifndef HEADER_RIPEMD_H
 # define HEADER_RIPEMD_H
 
+# include <openssl/opensslconf.h>
+
+#ifndef OPENSSL_NO_RMD160
 # include <openssl/e_os2.h>
 # include <stddef.h>
-
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 extern "C" {
-#endif
-
-# ifdef OPENSSL_NO_RMD160
-#  error RMD160 is disabled.
 # endif
 
 # define RIPEMD160_LONG unsigned int
@@ -88,8 +85,11 @@ int RIPEMD160_Update(RIPEMD160_CTX *c, const void *data, size_t len);
 int RIPEMD160_Final(unsigned char *md, RIPEMD160_CTX *c);
 unsigned char *RIPEMD160(const unsigned char *d, size_t n, unsigned char *md);
 void RIPEMD160_Transform(RIPEMD160_CTX *c, const unsigned char *b);
-#ifdef  __cplusplus
+
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
+
 
 #endif

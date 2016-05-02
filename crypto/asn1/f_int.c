@@ -1,4 +1,3 @@
-/* crypto/asn1/f_int.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -57,6 +56,7 @@
  */
 
 #include <stdio.h>
+#include <ctype.h>
 #include "internal/cryptlib.h"
 #include <openssl/buffer.h>
 #include <openssl/asn1.h>
@@ -164,7 +164,7 @@ int a2i_ASN1_INTEGER(BIO *bp, ASN1_INTEGER *bs, char *buf, int size)
         }
         i /= 2;
         if (num + i > slen) {
-            sp = OPENSSL_realloc_clean(s, slen, num + i * 2);
+            sp = OPENSSL_clear_realloc(s, slen, num + i * 2);
             if (sp == NULL) {
                 ASN1err(ASN1_F_A2I_ASN1_INTEGER, ERR_R_MALLOC_FAILURE);
                 OPENSSL_free(s);

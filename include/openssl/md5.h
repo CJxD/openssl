@@ -1,4 +1,3 @@
-/* crypto/md5/md5.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,15 +58,13 @@
 #ifndef HEADER_MD5_H
 # define HEADER_MD5_H
 
+# include <openssl/opensslconf.h>
+
+# ifndef OPENSSL_NO_MD5
 # include <openssl/e_os2.h>
 # include <stddef.h>
-
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 extern "C" {
-#endif
-
-# ifdef OPENSSL_NO_MD5
-#  error MD5 is disabled.
 # endif
 
 /*
@@ -93,8 +90,9 @@ int MD5_Update(MD5_CTX *c, const void *data, size_t len);
 int MD5_Final(unsigned char *md, MD5_CTX *c);
 unsigned char *MD5(const unsigned char *d, size_t n, unsigned char *md);
 void MD5_Transform(MD5_CTX *c, const unsigned char *b);
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
 
 #endif

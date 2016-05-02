@@ -1,4 +1,11 @@
-#!/usr/local/bin/perl
+#! /usr/bin/env perl
+# Copyright 2006-2016 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the OpenSSL license (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
 
 use strict;
 
@@ -13,7 +20,7 @@ open(IN, $mac_file) || die "Can't open $mac_file, $!\n";
 
 while (<IN>)
 	{
-	chomp;
+	s|\R$||;                # Better chomp
 	my ($name, $num) = /^(\S+)\s+(\S+)$/;
 	$oid_tbl{$name} = $num;
 	}
@@ -25,7 +32,7 @@ my $ln = 1;
 
 while (<IN>)
 	{
-	chomp;
+	s|\R$||;                # Better chomp
 	s/#.*$//;
 	next if (/^\S*$/);
 	my ($xr, $p1, $p2) = /^(\S+)\s+(\S+)\s+(\S+)/;
@@ -67,6 +74,8 @@ typedef struct {
     int hash_id;
     int pkey_id;
 } nid_triple;
+
+DEFINE_STACK_OF(nid_triple)
 
 static const nid_triple sigoid_srt[] = {
 EOF
@@ -110,6 +119,6 @@ sub check_oid
 	my ($chk) = @_;
 	if (!exists $oid_tbl{$chk})
 		{
-		die "Can't find \"$chk\", $!\n";
+		die "Can't find \"$chk\"\n";
 		}
 	}

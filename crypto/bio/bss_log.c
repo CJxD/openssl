@@ -1,4 +1,3 @@
-/* crypto/bio/bss_log.c */
 /* ====================================================================
  * Copyright (c) 1999 The OpenSSL Project.  All rights reserved.
  *
@@ -65,6 +64,7 @@
 #include <stdio.h>
 #include <errno.h>
 
+#include "bio_lcl.h"
 #include "internal/cryptlib.h"
 
 #if defined(OPENSSL_SYS_WINCE)
@@ -84,8 +84,6 @@ void *_malloc32(__size_t);
 #  endif                        /* __INITIAL_POINTER_SIZE == 64 */
 # endif                         /* __INITIAL_POINTER_SIZE && defined
                                  * _ANSI_C_SOURCE */
-#elif defined(__ultrix)
-# include <sys/syslog.h>
 #elif defined(OPENSSL_SYS_NETWARE)
 # define NO_SYSLOG
 #elif (!defined(MSDOS) || defined(WATT32)) && !defined(OPENSSL_SYS_VXWORKS) && !defined(NO_SYSLOG)
@@ -131,7 +129,7 @@ static void xopenlog(BIO *bp, char *name, int level);
 static void xsyslog(BIO *bp, int priority, const char *string);
 static void xcloselog(BIO *bp);
 
-static BIO_METHOD methods_slg = {
+static const BIO_METHOD methods_slg = {
     BIO_TYPE_MEM, "syslog",
     slg_write,
     NULL,
@@ -143,7 +141,7 @@ static BIO_METHOD methods_slg = {
     NULL,
 };
 
-BIO_METHOD *BIO_s_log(void)
+const BIO_METHOD *BIO_s_log(void)
 {
     return (&methods_slg);
 }

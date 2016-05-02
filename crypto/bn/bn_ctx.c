@@ -1,4 +1,3 @@
-/* crypto/bn/bn_ctx.c */
 /* Written by Ulf Moeller for the OpenSSL project. */
 /* ====================================================================
  * Copyright (c) 1998-2004 The OpenSSL Project.  All rights reserved.
@@ -53,14 +52,6 @@
  * Hudson (tjh@cryptsoft.com).
  *
  */
-
-#if !defined(BN_CTX_DEBUG) && !defined(BN_DEBUG)
-# ifndef NDEBUG
-#  define NDEBUG
-# endif
-#endif
-
-#include <assert.h>
 
 #include "internal/cryptlib.h"
 #include "bn_lcl.h"
@@ -204,7 +195,7 @@ BN_CTX *BN_CTX_secure_new(void)
 {
     BN_CTX *ret = BN_CTX_new();
 
-    if (ret)
+    if (ret != NULL)
         ret->flags = BN_FLG_SECURE;
     return ret;
 }
@@ -365,7 +356,7 @@ static BIGNUM *BN_POOL_get(BN_POOL *p, int flag)
         if (item == NULL)
             return NULL;
         for (loop = 0, bn = item->vals; loop++ < BN_CTX_POOL_SIZE; bn++) {
-            BN_init(bn);
+            bn_init(bn);
             if ((flag & BN_FLG_SECURE) != 0)
                 BN_set_flags(bn, BN_FLG_SECURE);
         }

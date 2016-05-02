@@ -1,4 +1,3 @@
-/* crypto/err/err.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -112,15 +111,15 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
-#include "internal/cryptlib.h"
+#include <internal/cryptlib_int.h>
+#include <internal/threads.h>
+#include <internal/err.h>
+#include <internal/err_int.h>
 #include <openssl/lhash.h>
 #include <openssl/crypto.h>
 #include <openssl/buffer.h>
 #include <openssl/bio.h>
-#include <openssl/err.h>
-
-DECLARE_LHASH_OF(ERR_STRING_DATA);
-DECLARE_LHASH_OF(ERR_STATE);
+#include <openssl/opensslconf.h>
 
 static void err_load_strings(int lib, ERR_STRING_DATA *str);
 
@@ -157,6 +156,9 @@ static ERR_STRING_DATA ERR_str_libraries[] = {
     {ERR_PACK(ERR_LIB_FIPS, 0, 0), "FIPS routines"},
     {ERR_PACK(ERR_LIB_CMS, 0, 0), "CMS routines"},
     {ERR_PACK(ERR_LIB_HMAC, 0, 0), "HMAC routines"},
+    {ERR_PACK(ERR_LIB_CT, 0, 0), "CT routines"},
+    {ERR_PACK(ERR_LIB_ASYNC, 0, 0), "ASYNC routines"},
+    {ERR_PACK(ERR_LIB_KDF, 0, 0), "KDF routines"},
     {0, NULL},
 };
 
@@ -174,6 +176,12 @@ static ERR_STRING_DATA ERR_str_functs[] = {
 # endif
     {ERR_PACK(0, SYS_F_OPENDIR, 0), "opendir"},
     {ERR_PACK(0, SYS_F_FREAD, 0), "fread"},
+    {ERR_PACK(0, SYS_F_GETADDRINFO, 0), "getaddrinfo"},
+    {ERR_PACK(0, SYS_F_GETNAMEINFO, 0), "getnameinfo"},
+    {ERR_PACK(0, SYS_F_SETSOCKOPT, 0), "setsockopt"},
+    {ERR_PACK(0, SYS_F_GETSOCKOPT, 0), "getsockopt"},
+    {ERR_PACK(0, SYS_F_GETSOCKNAME, 0), "getsockname"},
+    {ERR_PACK(0, SYS_F_GETHOSTBYNAME, 0), "gethostbyname"},
     {0, NULL},
 };
 
@@ -218,32 +226,28 @@ static ERR_STRING_DATA ERR_str_reasons[] = {
     {ERR_R_PASSED_NULL_PARAMETER, "passed a null parameter"},
     {ERR_R_INTERNAL_ERROR, "internal error"},
     {ERR_R_DISABLED, "called a function that was disabled at compile-time"},
+    {ERR_R_INIT_FAIL, "init fail"},
 
     {0, NULL},
 };
 #endif
 
+static CRYPTO_ONCE err_init = CRYPTO_ONCE_STATIC_INIT;
+static CRYPTO_THREAD_LOCAL err_thread_local;
+
+static CRYPTO_ONCE err_string_init = CRYPTO_ONCE_STATIC_INIT;
+static CRYPTO_RWLOCK *err_string_lock;
+
 /* Predeclarations of the "err_defaults" functions */
 static LHASH_OF(ERR_STRING_DATA) *get_hash(int create, int lockit);
 static ERR_STRING_DATA *int_err_get_item(const ERR_STRING_DATA *);
-static LHASH_OF(ERR_STATE) *int_thread_get(int create, int lockit);
-static void int_thread_release(LHASH_OF(ERR_STATE) **hash);
-static ERR_STATE *int_thread_get_item(const ERR_STATE *);
-static ERR_STATE *int_thread_set_item(ERR_STATE *);
-static void int_thread_del_item(const ERR_STATE *);
 
 /*
  * The internal state
  */
-static LHASH_OF(ERR_STRING_DATA) *int_error_hash = NULL;
-static LHASH_OF(ERR_STATE) *int_thread_hash = NULL;
-static int int_thread_hash_references = 0;
-static int int_err_library_number = ERR_LIB_USER;
 
-/*
- * These are the callbacks provided to "lh_new()" when creating the LHASH
- * tables internal to the "err_defaults" implementation.
- */
+static LHASH_OF(ERR_STRING_DATA) *int_error_hash = NULL;
+static int int_err_library_number = ERR_LIB_USER;
 
 static unsigned long get_error_values(int inc, int top, const char **file,
                                       int *line, const char **data,
@@ -258,31 +262,26 @@ static unsigned long err_string_data_hash(const ERR_STRING_DATA *a)
     return (ret ^ ret % 19 * 13);
 }
 
-static IMPLEMENT_LHASH_HASH_FN(err_string_data, ERR_STRING_DATA)
-
 static int err_string_data_cmp(const ERR_STRING_DATA *a,
                                const ERR_STRING_DATA *b)
 {
     return (int)(a->error - b->error);
 }
 
-static IMPLEMENT_LHASH_COMP_FN(err_string_data, ERR_STRING_DATA)
-
 static LHASH_OF(ERR_STRING_DATA) *get_hash(int create, int lockit)
 {
     LHASH_OF(ERR_STRING_DATA) *ret = NULL;
 
     if (lockit)
-        CRYPTO_w_lock(CRYPTO_LOCK_ERR);
+        CRYPTO_THREAD_write_lock(err_string_lock);
     if (!int_error_hash && create) {
-        CRYPTO_push_info("get_hash (err.c)");
-        int_error_hash = lh_ERR_STRING_DATA_new();
-        CRYPTO_pop_info();
+        int_error_hash = lh_ERR_STRING_DATA_new(err_string_data_hash,
+                                                err_string_data_cmp);
     }
-    if (int_error_hash)
+    if (int_error_hash != NULL)
         ret = int_error_hash;
     if (lockit)
-        CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+        CRYPTO_THREAD_unlock(err_string_lock);
 
     return ret;
 }
@@ -292,124 +291,13 @@ static ERR_STRING_DATA *int_err_get_item(const ERR_STRING_DATA *d)
     ERR_STRING_DATA *p = NULL;
     LHASH_OF(ERR_STRING_DATA) *hash;
 
-    CRYPTO_r_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_read_lock(err_string_lock);
     hash = get_hash(0, 0);
     if (hash)
         p = lh_ERR_STRING_DATA_retrieve(hash, d);
-    CRYPTO_r_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
 
     return p;
-}
-
-static unsigned long err_state_hash(const ERR_STATE *a)
-{
-    return CRYPTO_THREADID_hash(&a->tid) * 13;
-}
-
-static IMPLEMENT_LHASH_HASH_FN(err_state, ERR_STATE)
-
-static int err_state_cmp(const ERR_STATE *a, const ERR_STATE *b)
-{
-    return CRYPTO_THREADID_cmp(&a->tid, &b->tid);
-}
-
-static IMPLEMENT_LHASH_COMP_FN(err_state, ERR_STATE)
-
-static LHASH_OF(ERR_STATE) *int_thread_get(int create, int lockit)
-{
-    LHASH_OF(ERR_STATE) *ret = NULL;
-
-    if (lockit)
-        CRYPTO_w_lock(CRYPTO_LOCK_ERR);
-    if (!int_thread_hash && create) {
-        CRYPTO_push_info("int_thread_get (err.c)");
-        int_thread_hash = lh_ERR_STATE_new();
-        CRYPTO_pop_info();
-    }
-    if (int_thread_hash) {
-        int_thread_hash_references++;
-        ret = int_thread_hash;
-    }
-    if (lockit)
-        CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
-    return ret;
-}
-
-static void int_thread_release(LHASH_OF(ERR_STATE) **hash)
-{
-    int i;
-
-    if (hash == NULL || *hash == NULL)
-        return;
-
-    i = CRYPTO_add(&int_thread_hash_references, -1, CRYPTO_LOCK_ERR);
-
-#ifdef REF_PRINT
-    fprintf(stderr, "%4d:%s\n", int_thread_hash_references, "ERR");
-#endif
-    if (i > 0)
-        return;
-#ifdef REF_CHECK
-    if (i < 0) {
-        fprintf(stderr, "int_thread_release, bad reference count\n");
-        abort();                /* ok */
-    }
-#endif
-    *hash = NULL;
-}
-
-static ERR_STATE *int_thread_get_item(const ERR_STATE *d)
-{
-    ERR_STATE *p = NULL;
-    LHASH_OF(ERR_STATE) *hash;
-
-    CRYPTO_r_lock(CRYPTO_LOCK_ERR);
-    hash = int_thread_get(0, 0);
-    if (hash)
-        p = lh_ERR_STATE_retrieve(hash, d);
-    CRYPTO_r_unlock(CRYPTO_LOCK_ERR);
-
-    int_thread_release(&hash);
-    return p;
-}
-
-static ERR_STATE *int_thread_set_item(ERR_STATE *d)
-{
-    ERR_STATE *p = NULL;
-    LHASH_OF(ERR_STATE) *hash;
-
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
-    hash = int_thread_get(1, 0);
-    if (hash)
-        p = lh_ERR_STATE_insert(hash, d);
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
-
-    int_thread_release(&hash);
-    return p;
-}
-
-static void int_thread_del_item(const ERR_STATE *d)
-{
-    ERR_STATE *p = NULL;
-    LHASH_OF(ERR_STATE) *hash;
-
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
-    hash = int_thread_get(0, 0);
-    if (hash) {
-        p = lh_ERR_STATE_delete(hash, d);
-        /* If there are no other references, and we just removed the
-         * last item, delete the int_thread_hash */
-        if (int_thread_hash_references == 1
-            && int_thread_hash
-            && lh_ERR_STATE_num_items(int_thread_hash) == 0) {
-            lh_ERR_STATE_free(int_thread_hash);
-            int_thread_hash = NULL;
-        }
-    }
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
-
-    int_thread_release(&hash);
-    ERR_STATE_free(p);
 }
 
 #ifndef OPENSSL_NO_ERR
@@ -434,16 +322,9 @@ static void build_SYS_str_reasons(void)
     static int init = 1;
     int i;
 
-    CRYPTO_r_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_write_lock(err_string_lock);
     if (!init) {
-        CRYPTO_r_unlock(CRYPTO_LOCK_ERR);
-        return;
-    }
-
-    CRYPTO_r_unlock(CRYPTO_LOCK_ERR);
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
-    if (!init) {
-        CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+        CRYPTO_THREAD_unlock(err_string_lock);
         return;
     }
 
@@ -471,7 +352,7 @@ static void build_SYS_str_reasons(void)
 
     init = 0;
 
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
 }
 #endif
 
@@ -507,9 +388,22 @@ static void ERR_STATE_free(ERR_STATE *s)
     OPENSSL_free(s);
 }
 
+static void do_err_strings_init(void)
+{
+    err_string_lock = CRYPTO_THREAD_lock_new();
+}
+
+void err_cleanup(void)
+{
+    CRYPTO_THREAD_lock_free(err_string_lock);
+    err_string_lock = NULL;
+}
+
 void ERR_load_ERR_strings(void)
 {
 #ifndef OPENSSL_NO_ERR
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
+
     err_load_strings(0, ERR_str_libraries);
     err_load_strings(0, ERR_str_reasons);
     err_load_strings(ERR_LIB_SYS, ERR_str_functs);
@@ -522,7 +416,7 @@ static void err_load_strings(int lib, ERR_STRING_DATA *str)
 {
     LHASH_OF(ERR_STRING_DATA) *hash;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_write_lock(err_string_lock);
     hash = get_hash(1, 0);
     if (hash) {
         for (; str->error; str++) {
@@ -531,7 +425,7 @@ static void err_load_strings(int lib, ERR_STRING_DATA *str)
             (void)lh_ERR_STRING_DATA_insert(hash, str);
         }
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
 }
 
 void ERR_load_strings(int lib, ERR_STRING_DATA *str)
@@ -544,7 +438,9 @@ void ERR_unload_strings(int lib, ERR_STRING_DATA *str)
 {
     LHASH_OF(ERR_STRING_DATA) *hash;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
+
+    CRYPTO_THREAD_write_lock(err_string_lock);
     hash = get_hash(0, 0);
     if (hash) {
         for (; str->error; str++) {
@@ -553,15 +449,17 @@ void ERR_unload_strings(int lib, ERR_STRING_DATA *str)
             (void)lh_ERR_STRING_DATA_delete(hash, str);
         }
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
 }
 
-void ERR_free_strings(void)
+void err_free_strings_int(void)
 {
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
+
+    CRYPTO_THREAD_write_lock(err_string_lock);
     lh_ERR_STRING_DATA_free(int_error_hash);
     int_error_hash = NULL;
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
 }
 
 /********************************************************/
@@ -777,7 +675,6 @@ void ERR_error_string_n(unsigned long e, char *buf, size_t len)
     }
 }
 
-/* BAD for multi-threading: uses a local buffer if ret == NULL */
 /*
  * ERR_error_string_n should be used instead for ret != NULL as
  * ERR_error_string cannot know how large the buffer is
@@ -798,20 +695,12 @@ LHASH_OF(ERR_STRING_DATA) *ERR_get_string_table(void)
     return get_hash(0, 1);
 }
 
-LHASH_OF(ERR_STATE) *ERR_get_err_state_table(void)
-{
-    return int_thread_get(0, 1);
-}
-
-void ERR_release_err_state_table(LHASH_OF(ERR_STATE) **hash)
-{
-    int_thread_release(hash);
-}
-
 const char *ERR_lib_error_string(unsigned long e)
 {
     ERR_STRING_DATA d, *p;
     unsigned long l;
+
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
 
     l = ERR_GET_LIB(e);
     d.error = ERR_PACK(l, 0, 0);
@@ -823,6 +712,8 @@ const char *ERR_func_error_string(unsigned long e)
 {
     ERR_STRING_DATA d, *p;
     unsigned long l, f;
+
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
 
     l = ERR_GET_LIB(e);
     f = ERR_GET_FUNC(e);
@@ -836,6 +727,8 @@ const char *ERR_reason_error_string(unsigned long e)
     ERR_STRING_DATA d, *p = NULL;
     unsigned long l, r;
 
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
+
     l = ERR_GET_LIB(e);
     r = ERR_GET_REASON(e);
     d.error = ERR_PACK(l, 0, r);
@@ -847,73 +740,63 @@ const char *ERR_reason_error_string(unsigned long e)
     return ((p == NULL) ? NULL : p->string);
 }
 
-void ERR_remove_thread_state(const CRYPTO_THREADID *id)
+void ERR_remove_thread_state(void)
 {
-    ERR_STATE tmp;
+    ERR_STATE *state = ERR_get_state();
+    if (state == NULL)
+        return;
 
-    if (id)
-        CRYPTO_THREADID_cpy(&tmp.tid, id);
-    else
-        CRYPTO_THREADID_current(&tmp.tid);
-    /*
-     * thread_del_item automatically destroys the LHASH if the number of
-     * items reaches zero.
-     */
-    int_thread_del_item(&tmp);
+    CRYPTO_THREAD_set_local(&err_thread_local, NULL);
+    ERR_STATE_free(state);
 }
 
-#ifndef OPENSSL_NO_DEPRECATED
+#if OPENSSL_API_COMPAT < 0x10000000L
 void ERR_remove_state(unsigned long pid)
 {
-    ERR_remove_thread_state(NULL);
+    ERR_remove_thread_state();
 }
 #endif
 
+static void err_do_init(void)
+{
+    CRYPTO_THREAD_init_local(&err_thread_local, NULL);
+}
+
 ERR_STATE *ERR_get_state(void)
 {
-    static ERR_STATE fallback;
-    ERR_STATE *ret, tmp, *tmpp = NULL;
-    int i;
-    CRYPTO_THREADID tid;
+    ERR_STATE *state = NULL;
 
-    CRYPTO_THREADID_current(&tid);
-    CRYPTO_THREADID_cpy(&tmp.tid, &tid);
-    ret = int_thread_get_item(&tmp);
+    CRYPTO_THREAD_run_once(&err_init, err_do_init);
 
-    /* ret == the error state, if NULL, make a new one */
-    if (ret == NULL) {
-        ret = OPENSSL_malloc(sizeof(*ret));
-        if (ret == NULL)
-            return (&fallback);
-        CRYPTO_THREADID_cpy(&ret->tid, &tid);
-        ret->top = 0;
-        ret->bottom = 0;
-        for (i = 0; i < ERR_NUM_ERRORS; i++) {
-            ret->err_data[i] = NULL;
-            ret->err_data_flags[i] = 0;
+    state = CRYPTO_THREAD_get_local(&err_thread_local);
+
+    if (state == NULL) {
+        state = OPENSSL_zalloc(sizeof(*state));
+        if (state == NULL)
+            return NULL;
+
+        if (!CRYPTO_THREAD_set_local(&err_thread_local, state)) {
+            ERR_STATE_free(state);
+            return NULL;
         }
-        tmpp = int_thread_set_item(ret);
-        /* To check if insertion failed, do a get. */
-        if (int_thread_get_item(ret) != ret) {
-            ERR_STATE_free(ret); /* could not insert it */
-            return (&fallback);
-        }
-        /*
-         * If a race occurred in this function and we came second, tmpp is
-         * the first one that we just replaced.
-         */
-        ERR_STATE_free(tmpp);
+
+        /* Ignore failures from these */
+        OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
+        ossl_init_thread_start(OPENSSL_INIT_THREAD_ERR_STATE);
     }
-    return ret;
+
+    return state;
 }
 
 int ERR_get_next_error_library(void)
 {
     int ret;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_run_once(&err_string_init, do_err_strings_init);
+
+    CRYPTO_THREAD_write_lock(err_string_lock);
     ret = int_err_library_number++;
-    CRYPTO_w_unlock(CRYPTO_LOCK_ERR);
+    CRYPTO_THREAD_unlock(err_string_lock);
     return ret;
 }
 
@@ -967,7 +850,7 @@ void ERR_add_error_vdata(int num, va_list args)
                 }
                 str = p;
             }
-            BUF_strlcat(str, a, (size_t)s + 1);
+            OPENSSL_strlcat(str, a, (size_t)s + 1);
         }
     }
     ERR_set_error_data(str, ERR_TXT_MALLOCED | ERR_TXT_STRING);

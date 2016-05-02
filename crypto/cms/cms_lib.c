@@ -1,4 +1,3 @@
-/* crypto/cms/cms_lib.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -64,9 +63,6 @@
 IMPLEMENT_ASN1_FUNCTIONS(CMS_ContentInfo)
 IMPLEMENT_ASN1_PRINT_FUNCTION(CMS_ContentInfo)
 
-DECLARE_STACK_OF(CMS_CertificateChoices)
-DECLARE_STACK_OF(CMS_RevocationInfoChoice)
-
 const ASN1_OBJECT *CMS_get0_type(CMS_ContentInfo *cms)
 {
     return cms->contentType;
@@ -76,7 +72,7 @@ CMS_ContentInfo *cms_Data_create(void)
 {
     CMS_ContentInfo *cms;
     cms = CMS_ContentInfo_new();
-    if (cms) {
+    if (cms != NULL) {
         cms->contentType = OBJ_nid2obj(NID_pkcs7_data);
         /* Never detached */
         CMS_set_detached(cms, 0);
@@ -157,7 +153,7 @@ int CMS_dataFinal(CMS_ContentInfo *cms, BIO *cmsbio)
     ASN1_OCTET_STRING **pos = CMS_get0_content(cms);
     if (!pos)
         return 0;
-    /* If ebmedded content find memory BIO and set content */
+    /* If embedded content find memory BIO and set content */
     if (*pos && ((*pos)->flags & ASN1_STRING_FLAG_CONT)) {
         BIO *mbio;
         unsigned char *cont;
@@ -316,9 +312,9 @@ int CMS_set_detached(CMS_ContentInfo *cms, int detached)
         *pos = NULL;
         return 1;
     }
-    if (!*pos)
+    if (*pos == NULL)
         *pos = ASN1_OCTET_STRING_new();
-    if (*pos) {
+    if (*pos != NULL) {
         /*
          * NB: special flag to show content is created and not read in.
          */
@@ -344,7 +340,7 @@ BIO *cms_DigestAlgorithm_init_bio(X509_ALGOR *digestAlgorithm)
         goto err;
     }
     mdbio = BIO_new(BIO_f_md());
-    if (!mdbio || !BIO_set_md(mdbio, digest)) {
+    if (mdbio == NULL || !BIO_set_md(mdbio, digest)) {
         CMSerr(CMS_F_CMS_DIGESTALGORITHM_INIT_BIO, CMS_R_MD_BIO_INIT_ERROR);
         goto err;
     }

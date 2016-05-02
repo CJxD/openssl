@@ -56,8 +56,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <openssl/objects.h>
-#include <openssl/comp.h>
+#include "internal/comp.h"
 #include <openssl/err.h>
+#include "internal/cryptlib_int.h"
+#include "internal/bio.h"
 #include "comp_lcl.h"
 
 COMP_METHOD *COMP_zlib(void);
@@ -86,7 +88,7 @@ static int zlib_stateful_expand_block(COMP_CTX *ctx, unsigned char *out,
                                       unsigned int olen, unsigned char *in,
                                       unsigned int ilen);
 
-/* memory allocations functions for zlib intialization */
+/* memory allocations functions for zlib initialisation */
 static void *zlib_zalloc(void *opaque, unsigned int no, unsigned int size)
 {
     void *p;
@@ -122,7 +124,7 @@ static COMP_METHOD zlib_stateful_method = {
                                  * OPENSSL_SYS_WIN32) */
 
 # ifdef ZLIB_SHARED
-#  include <openssl/dso.h>
+#  include "internal/dso.h"
 
 /* Function pointers */
 typedef int (*compress_ft) (Bytef *dest, uLongf * destLen,
@@ -223,11 +225,6 @@ static int zlib_stateful_compress_block(COMP_CTX *ctx, unsigned char *out,
         err = deflate(&state->ostream, Z_SYNC_FLUSH);
     if (err != Z_OK)
         return -1;
-# ifdef DEBUG_ZLIB
-    fprintf(stderr, "compress(%4d)->%4d %s\n",
-            ilen, olen - state->ostream.avail_out,
-            (ilen != olen - state->ostream.avail_out) ? "zlib" : "clear");
-# endif
     return olen - state->ostream.avail_out;
 }
 
@@ -249,11 +246,6 @@ static int zlib_stateful_expand_block(COMP_CTX *ctx, unsigned char *out,
         err = inflate(&state->istream, Z_SYNC_FLUSH);
     if (err != Z_OK)
         return -1;
-# ifdef DEBUG_ZLIB
-    fprintf(stderr, "expand(%4d)->%4d %s\n",
-            ilen, olen - state->istream.avail_out,
-            (ilen != olen - state->istream.avail_out) ? "zlib" : "clear");
-# endif
     return olen - state->istream.avail_out;
 }
 
@@ -264,12 +256,19 @@ COMP_METHOD *COMP_zlib(void)
     COMP_METHOD *meth = &zlib_method_nozlib;
 
 #ifdef ZLIB_SHARED
-    if (!zlib_loaded) {
-# if defined(OPENSSL_SYS_WINDOWS) || defined(OPENSSL_SYS_WIN32)
-        zlib_dso = DSO_load(NULL, "ZLIB1", NULL, 0);
-# else
-        zlib_dso = DSO_load(NULL, "z", NULL, 0);
+    /* LIBZ may be externally defined, and we should respect that value */
+# ifndef LIBZ
+#  if defined(OPENSSL_SYS_WINDOWS) || defined(OPENSSL_SYS_WIN32)
+#   define LIBZ "ZLIB1"
+#  elif defined(OPENSSL_SYS_VMS)
+#   define LIBZ "LIBZ"
+#  else
+#   define LIBZ "z"
+#  endif
 # endif
+
+    if (!zlib_loaded) {
+        zlib_dso = DSO_load(NULL, LIBZ, NULL, 0);
         if (zlib_dso != NULL) {
             p_compress = (compress_ft) DSO_bind_func(zlib_dso, "compress");
             p_inflateEnd
@@ -288,6 +287,11 @@ COMP_METHOD *COMP_zlib(void)
                 && p_inflateInit_ && p_deflateEnd
                 && p_deflate && p_deflateInit_ && p_zError)
                 zlib_loaded++;
+
+            if (!OPENSSL_init_crypto(OPENSSL_INIT_ZLIB, NULL)) {
+                comp_zlib_cleanup_int();
+                return meth;
+            }
             if (zlib_loaded)
                 meth = &zlib_stateful_method;
         }
@@ -300,7 +304,7 @@ COMP_METHOD *COMP_zlib(void)
     return (meth);
 }
 
-void COMP_zlib_cleanup(void)
+void comp_zlib_cleanup_int(void)
 {
 #ifdef ZLIB_SHARED
     if (zlib_dso != NULL)
@@ -335,7 +339,7 @@ static int bio_zlib_write(BIO *b, const char *in, int inl);
 static long bio_zlib_ctrl(BIO *b, int cmd, long num, void *ptr);
 static long bio_zlib_callback_ctrl(BIO *b, int cmd, bio_info_cb *fp);
 
-static BIO_METHOD bio_meth_zlib = {
+static const BIO_METHOD bio_meth_zlib = {
     BIO_TYPE_COMP,
     "zlib",
     bio_zlib_write,
@@ -348,7 +352,7 @@ static BIO_METHOD bio_meth_zlib = {
     bio_zlib_callback_ctrl
 };
 
-BIO_METHOD *BIO_f_zlib(void)
+const BIO_METHOD *BIO_f_zlib(void)
 {
     return &bio_meth_zlib;
 }
@@ -364,7 +368,7 @@ static int bio_zlib_new(BIO *bi)
     }
 # endif
     ctx = OPENSSL_zalloc(sizeof(*ctx));
-    if (!ctx) {
+    if (ctx == NULL) {
         COMPerr(COMP_F_BIO_ZLIB_NEW, ERR_R_MALLOC_FAILURE);
         return 0;
     }
@@ -375,9 +379,9 @@ static int bio_zlib_new(BIO *bi)
     ctx->zout.zalloc = Z_NULL;
     ctx->zout.zfree = Z_NULL;
     ctx->comp_level = Z_DEFAULT_COMPRESSION;
-    bi->init = 1;
-    bi->ptr = (char *)ctx;
-    bi->flags = 0;
+    BIO_set_init(bi, 1);
+    BIO_set_data(bi, ctx);
+
     return 1;
 }
 
@@ -386,7 +390,7 @@ static int bio_zlib_free(BIO *bi)
     BIO_ZLIB_CTX *ctx;
     if (!bi)
         return 0;
-    ctx = (BIO_ZLIB_CTX *) bi->ptr;
+    ctx = BIO_get_data(bi);
     if (ctx->ibuf) {
         /* Destroy decompress context */
         inflateEnd(&ctx->zin);
@@ -398,9 +402,9 @@ static int bio_zlib_free(BIO *bi)
         OPENSSL_free(ctx->obuf);
     }
     OPENSSL_free(ctx);
-    bi->ptr = NULL;
-    bi->init = 0;
-    bi->flags = 0;
+    BIO_set_data(bi, NULL);
+    BIO_set_init(bi, 0);
+
     return 1;
 }
 
@@ -409,14 +413,16 @@ static int bio_zlib_read(BIO *b, char *out, int outl)
     BIO_ZLIB_CTX *ctx;
     int ret;
     z_stream *zin;
+    BIO *next = BIO_next(b);
+
     if (!out || !outl)
         return 0;
-    ctx = (BIO_ZLIB_CTX *) b->ptr;
+    ctx = BIO_get_data(b);
     zin = &ctx->zin;
     BIO_clear_retry_flags(b);
     if (!ctx->ibuf) {
         ctx->ibuf = OPENSSL_malloc(ctx->ibufsize);
-        if (!ctx->ibuf) {
+        if (ctx->ibuf == NULL) {
             COMPerr(COMP_F_BIO_ZLIB_READ, ERR_R_MALLOC_FAILURE);
             return 0;
         }
@@ -446,7 +452,7 @@ static int bio_zlib_read(BIO *b, char *out, int outl)
          * No data in input buffer try to read some in, if an error then
          * return the total data read.
          */
-        ret = BIO_read(b->next_bio, ctx->ibuf, ctx->ibufsize);
+        ret = BIO_read(next, ctx->ibuf, ctx->ibufsize);
         if (ret <= 0) {
             /* Total data read */
             int tot = outl - zin->avail_out;
@@ -465,9 +471,11 @@ static int bio_zlib_write(BIO *b, const char *in, int inl)
     BIO_ZLIB_CTX *ctx;
     int ret;
     z_stream *zout;
+    BIO *next = BIO_next(b);
+
     if (!in || !inl)
         return 0;
-    ctx = (BIO_ZLIB_CTX *) b->ptr;
+    ctx = BIO_get_data(b);
     if (ctx->odone)
         return 0;
     zout = &ctx->zout;
@@ -475,7 +483,7 @@ static int bio_zlib_write(BIO *b, const char *in, int inl)
     if (!ctx->obuf) {
         ctx->obuf = OPENSSL_malloc(ctx->obufsize);
         /* Need error here */
-        if (!ctx->obuf) {
+        if (ctx->obuf == NULL) {
             COMPerr(COMP_F_BIO_ZLIB_WRITE, ERR_R_MALLOC_FAILURE);
             return 0;
         }
@@ -491,7 +499,7 @@ static int bio_zlib_write(BIO *b, const char *in, int inl)
     for (;;) {
         /* If data in output buffer write it first */
         while (ctx->ocount) {
-            ret = BIO_write(b->next_bio, ctx->optr, ctx->ocount);
+            ret = BIO_write(next, ctx->optr, ctx->ocount);
             if (ret <= 0) {
                 /* Total data written */
                 int tot = inl - zout->avail_in;
@@ -530,7 +538,9 @@ static int bio_zlib_flush(BIO *b)
     BIO_ZLIB_CTX *ctx;
     int ret;
     z_stream *zout;
-    ctx = (BIO_ZLIB_CTX *) b->ptr;
+    BIO *next = BIO_next(b);
+
+    ctx = BIO_get_data(b);
     /* If no data written or already flush show success */
     if (!ctx->obuf || (ctx->odone && !ctx->ocount))
         return 1;
@@ -542,7 +552,7 @@ static int bio_zlib_flush(BIO *b)
     for (;;) {
         /* If data in output buffer write it first */
         while (ctx->ocount) {
-            ret = BIO_write(b->next_bio, ctx->optr, ctx->ocount);
+            ret = BIO_write(next, ctx->optr, ctx->ocount);
             if (ret <= 0) {
                 BIO_copy_next_retry(b);
                 return ret;
@@ -577,9 +587,11 @@ static long bio_zlib_ctrl(BIO *b, int cmd, long num, void *ptr)
     BIO_ZLIB_CTX *ctx;
     int ret, *ip;
     int ibs, obs;
-    if (!b->next_bio)
+    BIO *next = BIO_next(b);
+
+    if (next == NULL)
         return 0;
-    ctx = (BIO_ZLIB_CTX *) b->ptr;
+    ctx = BIO_get_data(b);
     switch (cmd) {
 
     case BIO_CTRL_RESET:
@@ -591,7 +603,7 @@ static long bio_zlib_ctrl(BIO *b, int cmd, long num, void *ptr)
     case BIO_CTRL_FLUSH:
         ret = bio_zlib_flush(b);
         if (ret > 0)
-            ret = BIO_flush(b->next_bio);
+            ret = BIO_flush(next);
         break;
 
     case BIO_C_SET_BUFF_SIZE:
@@ -624,12 +636,12 @@ static long bio_zlib_ctrl(BIO *b, int cmd, long num, void *ptr)
 
     case BIO_C_DO_STATE_MACHINE:
         BIO_clear_retry_flags(b);
-        ret = BIO_ctrl(b->next_bio, cmd, num, ptr);
+        ret = BIO_ctrl(next, cmd, num, ptr);
         BIO_copy_next_retry(b);
         break;
 
     default:
-        ret = BIO_ctrl(b->next_bio, cmd, num, ptr);
+        ret = BIO_ctrl(next, cmd, num, ptr);
         break;
 
     }
@@ -639,9 +651,10 @@ static long bio_zlib_ctrl(BIO *b, int cmd, long num, void *ptr)
 
 static long bio_zlib_callback_ctrl(BIO *b, int cmd, bio_info_cb *fp)
 {
-    if (!b->next_bio)
+    BIO *next = BIO_next(b);
+    if (next == NULL)
         return 0;
-    return BIO_callback_ctrl(b->next_bio, cmd, fp);
+    return BIO_callback_ctrl(next, cmd, fp);
 }
 
 #endif

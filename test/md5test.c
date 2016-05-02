@@ -1,4 +1,3 @@
-/* crypto/md5/md5test.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -118,10 +117,6 @@ int main(int argc, char *argv[])
         P++;
     }
 
-# ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-# endif
     EXIT(err);
 }
 

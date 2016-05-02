@@ -1,4 +1,3 @@
-/* crypto/ripemd/rmd_locl.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -67,7 +66,7 @@
  *                                      <appro@fy.chalmers.se>
  */
 #ifdef RMD160_ASM
-# if defined(__i386) || defined(__i386__) || defined(_M_IX86) || defined(__INTEL__)
+# if defined(__i386) || defined(__i386__) || defined(_M_IX86)
 #  define ripemd160_block_data_order ripemd160_block_asm_data_order
 # endif
 #endif

@@ -1,4 +1,3 @@
-/* crypto/x509/by_file.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -65,6 +64,7 @@
 #include <openssl/buffer.h>
 #include <openssl/x509.h>
 #include <openssl/pem.h>
+#include "x509_lcl.h"
 
 static int by_file_ctrl(X509_LOOKUP *ctx, int cmd, const char *argc,
                         long argl, char **ret);

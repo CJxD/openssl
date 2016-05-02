@@ -1,4 +1,3 @@
-/* crypto/cms/cms_smime.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -82,7 +81,7 @@ static int cms_copy_content(BIO *out, BIO *in, unsigned int flags)
 
     tmpout = cms_get_text_bio(out, flags);
 
-    if (!tmpout) {
+    if (tmpout == NULL) {
         CMSerr(CMS_F_CMS_COPY_CONTENT, ERR_R_MALLOC_FAILURE);
         goto err;
     }
@@ -253,7 +252,7 @@ CMS_ContentInfo *CMS_EncryptedData_encrypt(BIO *in, const EVP_CIPHER *cipher,
         return NULL;
     }
     cms = CMS_ContentInfo_new();
-    if (!cms)
+    if (cms == NULL)
         return NULL;
     if (!CMS_EncryptedData_set1_key(cms, cipher, key, keylen))
         return NULL;
@@ -272,24 +271,28 @@ CMS_ContentInfo *CMS_EncryptedData_encrypt(BIO *in, const EVP_CIPHER *cipher,
 static int cms_signerinfo_verify_cert(CMS_SignerInfo *si,
                                       X509_STORE *store,
                                       STACK_OF(X509) *certs,
-                                      STACK_OF(X509_CRL) *crls,
-                                      unsigned int flags)
+                                      STACK_OF(X509_CRL) *crls)
 {
-    X509_STORE_CTX ctx;
+    X509_STORE_CTX *ctx = X509_STORE_CTX_new();
     X509 *signer;
     int i, j, r = 0;
+
+    if (ctx == NULL) {
+        CMSerr(CMS_F_CMS_SIGNERINFO_VERIFY_CERT, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
     CMS_SignerInfo_get0_algs(si, NULL, &signer, NULL, NULL);
-    if (!X509_STORE_CTX_init(&ctx, store, signer, certs)) {
+    if (!X509_STORE_CTX_init(ctx, store, signer, certs)) {
         CMSerr(CMS_F_CMS_SIGNERINFO_VERIFY_CERT, CMS_R_STORE_INIT_ERROR);
         goto err;
     }
-    X509_STORE_CTX_set_default(&ctx, "smime_sign");
+    X509_STORE_CTX_set_default(ctx, "smime_sign");
     if (crls)
-        X509_STORE_CTX_set0_crls(&ctx, crls);
+        X509_STORE_CTX_set0_crls(ctx, crls);
 
-    i = X509_verify_cert(&ctx);
+    i = X509_verify_cert(ctx);
     if (i <= 0) {
-        j = X509_STORE_CTX_get_error(&ctx);
+        j = X509_STORE_CTX_get_error(ctx);
         CMSerr(CMS_F_CMS_SIGNERINFO_VERIFY_CERT,
                CMS_R_CERTIFICATE_VERIFY_ERROR);
         ERR_add_error_data(2, "Verify error:",
@@ -298,7 +301,7 @@ static int cms_signerinfo_verify_cert(CMS_SignerInfo *si,
     }
     r = 1;
  err:
-    X509_STORE_CTX_cleanup(&ctx);
+    X509_STORE_CTX_free(ctx);
     return r;
 
 }
@@ -354,8 +357,7 @@ int CMS_verify(CMS_ContentInfo *cms, STACK_OF(X509) *certs,
             crls = CMS_get1_crls(cms);
         for (i = 0; i < sk_CMS_SignerInfo_num(sinfos); i++) {
             si = sk_CMS_SignerInfo_value(sinfos, i);
-            if (!cms_signerinfo_verify_cert(si, store,
-                                            cms_certs, crls, flags))
+            if (!cms_signerinfo_verify_cert(si, store, cms_certs, crls))
                 goto err;
         }
     }
@@ -482,7 +484,7 @@ CMS_ContentInfo *CMS_sign(X509 *signcert, EVP_PKEY *pkey,
     int i;
 
     cms = CMS_ContentInfo_new();
-    if (!cms || !CMS_SignedData_init(cms))
+    if (cms == NULL || !CMS_SignedData_init(cms))
         goto merr;
     if (flags & CMS_ASCIICRLF
         && !CMS_set1_eContentType(cms,

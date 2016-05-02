@@ -1,4 +1,3 @@
-/* ext_dat.h */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -56,7 +55,8 @@
  * Hudson (tjh@cryptsoft.com).
  *
  */
-/* This file contains a table of "standard" extensions */
+
+int name_cmp(const char *name, const char *cmp);
 
 extern const X509V3_EXT_METHOD v3_bcons, v3_nscert, v3_key_usage, v3_ext_ku;
 extern const X509V3_EXT_METHOD v3_pkey_usage_period, v3_sxnet, v3_info, v3_sinfo;
@@ -70,3 +70,4 @@ extern const X509V3_EXT_METHOD v3_policy_mappings, v3_policy_constraints;
 extern const X509V3_EXT_METHOD v3_name_constraints, v3_inhibit_anyp, v3_idp;
 extern const X509V3_EXT_METHOD v3_addr, v3_asid;
 extern const X509V3_EXT_METHOD v3_ct_scts[];
+extern const X509V3_EXT_METHOD v3_tls_feature;

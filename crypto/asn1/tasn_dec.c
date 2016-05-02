@@ -1,4 +1,3 @@
-/* tasn_dec.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -274,6 +273,12 @@ static int asn1_item_embed_d2i(ASN1_VALUE **pval, const unsigned char **in,
             /* If field not present, try the next one */
             if (ret == -1)
                 continue;
+            /*
+             * Set the choice selector here to ensure that the value is
+             * correctly freed upon error. It may be partially initialized
+             * even if parsing failed.
+             */
+            asn1_set_choice_selector(pval, i, it);
             /* If positive return, read OK, break loop */
             if (ret > 0)
                 break;
@@ -295,7 +300,6 @@ static int asn1_item_embed_d2i(ASN1_VALUE **pval, const unsigned char **in,
             goto err;
         }
 
-        asn1_set_choice_selector(pval, i, it);
         if (asn1_cb && !asn1_cb(ASN1_OP_D2I_POST, pval, it, NULL))
             goto auxerr;
         *in = p;
@@ -618,11 +622,14 @@ static int asn1_template_noexp_d2i(ASN1_VALUE **val,
                                      ASN1_ITEM_ptr(tt->item), -1, 0, 0, ctx)) {
                 ASN1err(ASN1_F_ASN1_TEMPLATE_NOEXP_D2I,
                         ERR_R_NESTED_ASN1_ERROR);
+                /* |skfield| may be partially allocated despite failure. */
+                ASN1_item_free(skfield, ASN1_ITEM_ptr(tt->item));
                 goto err;
             }
             len -= p - q;
             if (!sk_ASN1_VALUE_push((STACK_OF(ASN1_VALUE) *)*val, skfield)) {
                 ASN1err(ASN1_F_ASN1_TEMPLATE_NOEXP_D2I, ERR_R_MALLOC_FAILURE);
+                ASN1_item_free(skfield, ASN1_ITEM_ptr(tt->item));
                 goto err;
             }
         }
@@ -667,7 +674,7 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
     long plen;
     char cst, inf, free_cont = 0;
     const unsigned char *p;
-    BUF_MEM buf = { 0 };
+    BUF_MEM buf = { 0, NULL, 0, 0 };
     const unsigned char *cont = NULL;
     long len;
     if (!pval) {
@@ -743,7 +750,6 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
         } else {
             len = p - cont + plen;
             p += plen;
-            buf.data = NULL;
         }
     } else if (cst) {
         if (utype == V_ASN1_NULL || utype == V_ASN1_BOOLEAN
@@ -752,9 +758,9 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
             ASN1err(ASN1_F_ASN1_D2I_EX_PRIMITIVE, ASN1_R_TYPE_NOT_PRIMITIVE);
             return 0;
         }
-        buf.length = 0;
-        buf.max = 0;
-        buf.data = NULL;
+
+        /* Free any returned 'buf' content */
+        free_cont = 1;
         /*
          * Should really check the internal tags are correct but some things
          * may get this wrong. The relevant specs say that constructed string
@@ -762,18 +768,16 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
          * So instead just check for UNIVERSAL class and ignore the tag.
          */
         if (!asn1_collect(&buf, &p, plen, inf, -1, V_ASN1_UNIVERSAL, 0)) {
-            free_cont = 1;
             goto err;
         }
         len = buf.length;
         /* Append a final null to string */
         if (!BUF_MEM_grow_clean(&buf, len + 1)) {
             ASN1err(ASN1_F_ASN1_D2I_EX_PRIMITIVE, ERR_R_MALLOC_FAILURE);
-            return 0;
+            goto err;
         }
         buf.data[len] = 0;
         cont = (const unsigned char *)buf.data;
-        free_cont = 1;
     } else {
         cont = p;
         len = plen;
@@ -781,6 +785,7 @@ static int asn1_d2i_ex_primitive(ASN1_VALUE **pval,
     }
 
     /* We now have content length and type: translate into a structure */
+    /* asn1_ex_c2i may reuse allocated buffer, and so sets free_cont to 0 */
     if (!asn1_ex_c2i(pval, cont, len, utype, &free_cont, it))
         goto err;
 
@@ -893,7 +898,7 @@ static int asn1_ex_c2i(ASN1_VALUE **pval, const unsigned char *cont, int len,
         /* All based on ASN1_STRING and handled the same */
         if (!*pval) {
             stmp = ASN1_STRING_type_new(utype);
-            if (!stmp) {
+            if (stmp == NULL) {
                 ASN1err(ASN1_F_ASN1_EX_C2I, ERR_R_MALLOC_FAILURE);
                 goto err;
             }
@@ -986,7 +991,7 @@ static int asn1_find_end(const unsigned char **in, long len, char inf)
 }
 
 /*
- * This function collects the asn1 data from a constructred string type into
+ * This function collects the asn1 data from a constructed string type into
  * a buffer. The values of 'in' and 'len' should refer to the contents of the
  * constructed type and 'inf' should be set if it is indefinite length.
  */

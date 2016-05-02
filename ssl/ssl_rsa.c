@@ -1,4 +1,3 @@
-/* ssl/ssl_rsa.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -157,7 +156,10 @@ int SSL_use_RSAPrivateKey(SSL *ssl, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ssl->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -168,22 +170,7 @@ int SSL_use_RSAPrivateKey(SSL *ssl, RSA *rsa)
 static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
 {
     int i;
-    /*
-     * Special case for DH: check two DH certificate types for a match. This
-     * means for DH certificates we must set the certificate first.
-     */
-    if (pkey->type == EVP_PKEY_DH) {
-        X509 *x;
-        i = -1;
-        x = c->pkeys[SSL_PKEY_DH_RSA].x509;
-        if (x && X509_check_private_key(x, pkey))
-            i = SSL_PKEY_DH_RSA;
-        x = c->pkeys[SSL_PKEY_DH_DSA].x509;
-        if (i == -1 && x && X509_check_private_key(x, pkey))
-            i = SSL_PKEY_DH_DSA;
-        ERR_clear_error();
-    } else
-        i = ssl_cert_type(NULL, pkey);
+    i = ssl_cert_type(NULL, pkey);
     if (i < 0) {
         SSLerr(SSL_F_SSL_SET_PKEY, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
         return (0);
@@ -191,9 +178,16 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
 
     if (c->pkeys[i].x509 != NULL) {
         EVP_PKEY *pktmp;
-        pktmp = X509_get_pubkey(c->pkeys[i].x509);
+        pktmp = X509_get0_pubkey(c->pkeys[i].x509);
+        if (pktmp == NULL) {
+            SSLerr(SSL_F_SSL_SET_PKEY, ERR_R_MALLOC_FAILURE);
+            return 0;
+        }
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pktmp, pkey);
-        EVP_PKEY_free(pktmp);
         ERR_clear_error();
 
 #ifndef OPENSSL_NO_RSA
@@ -201,8 +195,8 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
          * Don't check the public/private key, this is mostly for smart
          * cards.
          */
-        if ((pkey->type == EVP_PKEY_RSA) &&
-            (RSA_flags(pkey->pkey.rsa) & RSA_METHOD_FLAG_NO_CHECK)) ;
+        if (EVP_PKEY_id(pkey) == EVP_PKEY_RSA
+            && RSA_flags(EVP_PKEY_get0_RSA(pkey)) & RSA_METHOD_FLAG_NO_CHECK);
         else
 #endif
         if (!X509_check_private_key(c->pkeys[i].x509, pkey)) {
@@ -213,7 +207,7 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
     }
 
     EVP_PKEY_free(c->pkeys[i].privatekey);
-    CRYPTO_add(&pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    EVP_PKEY_up_ref(pkey);
     c->pkeys[i].privatekey = pkey;
     c->key = &(c->pkeys[i]);
     return (1);
@@ -372,7 +366,7 @@ static int ssl_set_cert(CERT *c, X509 *x)
     EVP_PKEY *pkey;
     int i;
 
-    pkey = X509_get_pubkey(x);
+    pkey = X509_get0_pubkey(x);
     if (pkey == NULL) {
         SSLerr(SSL_F_SSL_SET_CERT, SSL_R_X509_LIB);
         return (0);
@@ -381,11 +375,19 @@ static int ssl_set_cert(CERT *c, X509 *x)
     i = ssl_cert_type(x, pkey);
     if (i < 0) {
         SSLerr(SSL_F_SSL_SET_CERT, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
-        EVP_PKEY_free(pkey);
-        return (0);
+        return 0;
     }
-
+#ifndef OPENSSL_NO_EC
+    if (i == SSL_PKEY_ECC && !EC_KEY_can_sign(EVP_PKEY_get0_EC_KEY(pkey))) {
+        SSLerr(SSL_F_SSL_SET_CERT, SSL_R_ECC_CERT_NOT_FOR_SIGNING);
+        return 0;
+    }
+#endif
     if (c->pkeys[i].privatekey != NULL) {
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pkey, c->pkeys[i].privatekey);
         ERR_clear_error();
 
@@ -394,9 +396,9 @@ static int ssl_set_cert(CERT *c, X509 *x)
          * Don't check the public/private key, this is mostly for smart
          * cards.
          */
-        if ((c->pkeys[i].privatekey->type == EVP_PKEY_RSA) &&
-            (RSA_flags(c->pkeys[i].privatekey->pkey.rsa) &
-             RSA_METHOD_FLAG_NO_CHECK)) ;
+        if (EVP_PKEY_id(c->pkeys[i].privatekey) == EVP_PKEY_RSA
+            && RSA_flags(EVP_PKEY_get0_RSA(c->pkeys[i].privatekey)) &
+               RSA_METHOD_FLAG_NO_CHECK) ;
         else
 #endif                          /* OPENSSL_NO_RSA */
         if (!X509_check_private_key(x, c->pkeys[i].privatekey)) {
@@ -412,14 +414,12 @@ static int ssl_set_cert(CERT *c, X509 *x)
         }
     }
 
-    EVP_PKEY_free(pkey);
-
     X509_free(c->pkeys[i].x509);
     X509_up_ref(x);
     c->pkeys[i].x509 = x;
     c->key = &(c->pkeys[i]);
 
-    return (1);
+    return 1;
 }
 
 #ifndef OPENSSL_NO_STDIO
@@ -498,7 +498,10 @@ int SSL_CTX_use_RSAPrivateKey(SSL_CTX *ctx, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ctx->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -644,9 +647,19 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
     BIO *in;
     int ret = 0;
     X509 *x = NULL;
+    pem_password_cb *passwd_callback;
+    void *passwd_callback_userdata;
 
     ERR_clear_error();          /* clear error stack for
                                  * SSL_CTX_use_certificate() */
+
+    if (ctx != NULL) {
+        passwd_callback = ctx->default_passwd_callback;
+        passwd_callback_userdata = ctx->default_passwd_callback_userdata;
+    } else {
+        passwd_callback = ssl->default_passwd_callback;
+        passwd_callback_userdata = ssl->default_passwd_callback_userdata;
+    }
 
     in = BIO_new(BIO_s_file());
     if (in == NULL) {
@@ -659,8 +672,8 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
         goto end;
     }
 
-    x = PEM_read_bio_X509_AUX(in, NULL, ctx->default_passwd_callback,
-                              ctx->default_passwd_callback_userdata);
+    x = PEM_read_bio_X509_AUX(in, NULL, passwd_callback,
+                              passwd_callback_userdata);
     if (x == NULL) {
         SSLerr(SSL_F_USE_CERTIFICATE_CHAIN_FILE, ERR_R_PEM_LIB);
         goto end;
@@ -693,10 +706,9 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
             goto end;
         }
 
-        while ((ca = PEM_read_bio_X509(in, NULL,
-                                       ctx->default_passwd_callback,
-                                       ctx->default_passwd_callback_userdata))
-               != NULL) {
+        while ((ca = PEM_read_bio_X509(in, NULL, passwd_callback,
+                                       passwd_callback_userdata))
+                != NULL) {
             if (ctx)
                 r = SSL_CTX_add0_chain_cert(ctx, ca);
             else
@@ -819,7 +831,7 @@ static int serverinfo_srv_add_cb(SSL *s, unsigned int ext_type,
             return 0;           /* No extension found, don't send extension */
         return 1;               /* Send extension */
     }
-    return -1;                  /* No serverinfo data found, don't send
+    return 0;                   /* No serverinfo data found, don't send
                                  * extension */
 }
 
@@ -848,12 +860,26 @@ static int serverinfo_process_buffer(const unsigned char *serverinfo,
 
         /* Register callbacks for extensions */
         ext_type = (serverinfo[0] << 8) + serverinfo[1];
-        if (ctx && !SSL_CTX_add_server_custom_ext(ctx, ext_type,
-                                                  serverinfo_srv_add_cb,
-                                                  NULL, NULL,
-                                                  serverinfo_srv_parse_cb,
-                                                  NULL))
-            return 0;
+        if (ctx) {
+            int have_ext_cbs = 0;
+            size_t i;
+            custom_ext_methods *exts = &ctx->cert->srv_ext;
+            custom_ext_method *meth = exts->meths;
+
+            for (i = 0; i < exts->meths_count; i++, meth++) {
+                if (ext_type == meth->ext_type) {
+                    have_ext_cbs = 1;
+                    break;
+                }
+            }
+
+            if (!have_ext_cbs && !SSL_CTX_add_server_custom_ext(ctx, ext_type,
+                                                                serverinfo_srv_add_cb,
+                                                                NULL, NULL,
+                                                                serverinfo_srv_parse_cb,
+                                                                NULL))
+                return 0;
+        }
 
         serverinfo += 2;
         serverinfo_length -= 2;

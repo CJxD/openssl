@@ -144,7 +144,7 @@ struct TS_status_info_st {
     ASN1_BIT_STRING *failure_info;
 };
 
-DECLARE_STACK_OF(ASN1_UTF8STRING)
+DEFINE_STACK_OF(ASN1_UTF8STRING)
 
 /*-
  * IssuerSerial ::= SEQUENCE {
@@ -183,6 +183,7 @@ struct ESS_signing_cert {
 struct TS_resp_ctx {
     X509 *signer_cert;
     EVP_PKEY *signer_key;
+    const EVP_MD *signer_md;
     STACK_OF(X509) *certs;      /* Certs to include in signed data. */
     STACK_OF(ASN1_OBJECT) *policies; /* Acceptable policies. */
     ASN1_OBJECT *default_policy; /* It may appear in policies, too. */

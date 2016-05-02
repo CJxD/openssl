@@ -55,6 +55,7 @@
 
 #include <string.h>
 
+#include <openssl/opensslconf.h>
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -71,19 +72,13 @@
 #define EXTENSION_SIZE_LEN      2
 
 
-#define TOTAL_NUM_TESTS                         2
-
-/*
- * Test that explicitly setting ticket data results in it appearing in the
- * ClientHello for TLS1.2
- */
-#define TEST_SET_SESSION_TICK_DATA_TLS_1_2      0
+#define TOTAL_NUM_TESTS                         1
 
 /*
  * Test that explicitly setting ticket data results in it appearing in the
  * ClientHello for a negotiated SSL/TLS version
  */
-#define TEST_SET_SESSION_TICK_DATA_VER_NEG      1
+#define TEST_SET_SESSION_TICK_DATA_VER_NEG      0
 
 int main(int argc, char *argv[])
 {
@@ -102,13 +97,9 @@ int main(int argc, char *argv[])
     int testresult = 0;
     int currtest = 0;
 
-    SSL_library_init();
-    SSL_load_error_strings();
-
     err = BIO_new_fp(stderr, BIO_NOCLOSE | BIO_FP_TEXT);
 
-    CRYPTO_malloc_debug_init();
-    CRYPTO_set_mem_debug_options(V_CRYPTO_MDEBUG_ALL);
+    CRYPTO_set_mem_debug(1);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
     /*
@@ -117,11 +108,7 @@ int main(int argc, char *argv[])
      */
     for (; currtest < TOTAL_NUM_TESTS; currtest++) {
         testresult = 0;
-        if (currtest == TEST_SET_SESSION_TICK_DATA_TLS_1_2) {
-            ctx = SSL_CTX_new(TLSv1_2_method());
-        } else {
-            ctx = SSL_CTX_new(TLS_method());
-        }
+        ctx = SSL_CTX_new(TLS_method());
         con = SSL_new(ctx);
 
         rbio = BIO_new(BIO_s_mem());
@@ -129,8 +116,7 @@ int main(int argc, char *argv[])
         SSL_set_bio(con, rbio, wbio);
         SSL_set_connect_state(con);
 
-        if (currtest == TEST_SET_SESSION_TICK_DATA_TLS_1_2
-                || currtest == TEST_SET_SESSION_TICK_DATA_VER_NEG) {
+        if (currtest == TEST_SET_SESSION_TICK_DATA_VER_NEG) {
             if (!SSL_set_session_ticket_ext(con, dummytick, strlen(dummytick)))
                 goto end;
         }
@@ -182,8 +168,7 @@ int main(int argc, char *argv[])
                 goto end;
 
             if (type == TLSEXT_TYPE_session_ticket) {
-                if (currtest == TEST_SET_SESSION_TICK_DATA_TLS_1_2
-                        || currtest == TEST_SET_SESSION_TICK_DATA_VER_NEG) {
+                if (currtest == TEST_SET_SESSION_TICK_DATA_VER_NEG) {
                     if (size == strlen(dummytick)
                             && memcmp(data, dummytick, size) == 0) {
                         /* Ticket data is as we expected */
@@ -208,11 +193,10 @@ int main(int argc, char *argv[])
         }
     }
 
-    ERR_free_strings();
-    ERR_remove_thread_state(NULL);
-    EVP_cleanup();
-    CRYPTO_cleanup_all_ex_data();
-    CRYPTO_mem_leaks(err);
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+    if (CRYPTO_mem_leaks(err) <= 0)
+        testresult = 0;
+#endif
     BIO_free(err);
 
     return testresult?0:1;

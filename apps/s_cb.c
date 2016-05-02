@@ -131,8 +131,10 @@ int verify_depth = 0;
 int verify_quiet = 0;
 int verify_error = X509_V_OK;
 int verify_return_error = 0;
+#ifndef OPENSSL_NO_SOCK
 static unsigned char cookie_secret[COOKIE_SECRET_LENGTH];
 static int cookie_initialized = 0;
+#endif
 
 static const char *lookup(int val, const STRINT_PAIR* list, const char* def)
 {
@@ -167,7 +169,7 @@ int verify_callback(int ok, X509_STORE_CTX *ctx)
         if (verify_depth >= depth) {
             if (!verify_return_error)
                 ok = 1;
-            verify_error = X509_V_OK;
+            verify_error = err;
         } else {
             ok = 0;
             verify_error = X509_V_ERR_CERT_CHAIN_TOO_LONG;
@@ -404,8 +406,6 @@ int ssl_print_point_formats(BIO *out, SSL *s)
 
         }
     }
-    if (nformats <= 0)
-        BIO_puts(out, "NONE");
     BIO_puts(out, "\n");
     return 1;
 }
@@ -437,8 +437,6 @@ int ssl_print_curves(BIO *out, SSL *s, int noshared)
             BIO_printf(out, "%s", cname);
         }
     }
-    if (ncurves == 0)
-        BIO_puts(out, "NONE");
     OPENSSL_free(curves);
     if (noshared) {
         BIO_puts(out, "\n");
@@ -505,12 +503,12 @@ long bio_dump_callback(BIO *bio, int cmd, const char *argp,
 
     if (cmd == (BIO_CB_READ | BIO_CB_RETURN)) {
         BIO_printf(out, "read from %p [%p] (%lu bytes => %ld (0x%lX))\n",
-                   (void *)bio, argp, (unsigned long)argi, ret, ret);
+                   (void *)bio, (void *)argp, (unsigned long)argi, ret, ret);
         BIO_dump(out, argp, (int)ret);
         return (ret);
     } else if (cmd == (BIO_CB_WRITE | BIO_CB_RETURN)) {
         BIO_printf(out, "write to %p [%p] (%lu bytes => %ld (0x%lX))\n",
-                   (void *)bio, argp, (unsigned long)argi, ret, ret);
+                   (void *)bio, (void *)argp, (unsigned long)argi, ret, ret);
         BIO_dump(out, argp, (int)ret);
     }
     return (ret);
@@ -596,6 +594,7 @@ static STRINT_PAIR handshakes[] = {
     {", ClientHello", 1},
     {", ServerHello", 2},
     {", HelloVerifyRequest", 3},
+    {", NewSessionTicket", 4},
     {", Certificate", 11},
     {", ServerKeyExchange", 12},
     {", CertificateRequest", 13},
@@ -603,6 +602,9 @@ static STRINT_PAIR handshakes[] = {
     {", CertificateVerify", 15},
     {", ClientKeyExchange", 16},
     {", Finished", 20},
+    {", CertificateUrl", 21},
+    {", CertificateStatus", 22},
+    {", SupplementalData", 23},
     {NULL}
 };
 
@@ -644,6 +646,9 @@ void msg_cb(int write_p, int version, int content_type, const void *buf,
             str_details1 = "???";
             if (len > 0)
                 str_details1 = lookup((int)bp[0], handshakes, "???");
+            break;
+        case 23:
+            str_content_type = "ApplicationData";
             break;
 #ifndef OPENSSL_NO_HEARTBEATS
         case 24:
@@ -704,6 +709,7 @@ static STRINT_PAIR tlsext_types[] = {
     {"heartbeat", TLSEXT_TYPE_heartbeat},
     {"session ticket", TLSEXT_TYPE_session_ticket},
     {"renegotiation info", TLSEXT_TYPE_renegotiate},
+    {"signed certificate timestamps", TLSEXT_TYPE_signed_certificate_timestamp},
     {"TLS padding", TLSEXT_TYPE_padding},
 #ifdef TLSEXT_TYPE_next_proto_neg
     {"next protocol", TLSEXT_TYPE_next_proto_neg},
@@ -722,29 +728,25 @@ static STRINT_PAIR tlsext_types[] = {
 };
 
 void tlsext_cb(SSL *s, int client_server, int type,
-               unsigned char *data, int len, void *arg)
+               const unsigned char *data, int len, void *arg)
 {
     BIO *bio = arg;
     const char *extname = lookup(type, tlsext_types, "unknown");
 
     BIO_printf(bio, "TLS %s extension \"%s\" (id=%d), len=%d\n",
                client_server ? "server" : "client", extname, type, len);
-    BIO_dump(bio, (char *)data, len);
+    BIO_dump(bio, (const char *)data, len);
     (void)BIO_flush(bio);
 }
 
+#ifndef OPENSSL_NO_SOCK
 int generate_cookie_callback(SSL *ssl, unsigned char *cookie,
                              unsigned int *cookie_len)
 {
-    unsigned char *buffer, result[EVP_MAX_MD_SIZE];
-    unsigned int length, resultlength;
-    union {
-        struct sockaddr sa;
-        struct sockaddr_in s4;
-#if OPENSSL_USE_IPV6
-        struct sockaddr_in6 s6;
-#endif
-    } peer;
+    unsigned char *buffer;
+    size_t length;
+    unsigned short port;
+    BIO_ADDR *peer = NULL;
 
     /* Initialize a random secret */
     if (!cookie_initialized) {
@@ -755,53 +757,31 @@ int generate_cookie_callback(SSL *ssl, unsigned char *cookie,
         cookie_initialized = 1;
     }
 
+    peer = BIO_ADDR_new();
+    if (peer == NULL) {
+        BIO_printf(bio_err, "memory full\n");
+        return 0;
+    }
+
     /* Read peer information */
-    (void)BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
+    (void)BIO_dgram_get_peer(SSL_get_rbio(ssl), peer);
 
     /* Create buffer with peer's address and port */
-    length = 0;
-    switch (peer.sa.sa_family) {
-    case AF_INET:
-        length += sizeof(struct in_addr);
-        length += sizeof(peer.s4.sin_port);
-        break;
-#if OPENSSL_USE_IPV6
-    case AF_INET6:
-        length += sizeof(struct in6_addr);
-        length += sizeof(peer.s6.sin6_port);
-        break;
-#endif
-    default:
-        OPENSSL_assert(0);
-        break;
-    }
+    BIO_ADDR_rawaddress(peer, NULL, &length);
+    OPENSSL_assert(length != 0);
+    port = BIO_ADDR_rawport(peer);
+    length += sizeof(port);
     buffer = app_malloc(length, "cookie generate buffer");
 
-    switch (peer.sa.sa_family) {
-    case AF_INET:
-        memcpy(buffer, &peer.s4.sin_port, sizeof(peer.s4.sin_port));
-        memcpy(buffer + sizeof(peer.s4.sin_port),
-               &peer.s4.sin_addr, sizeof(struct in_addr));
-        break;
-#if OPENSSL_USE_IPV6
-    case AF_INET6:
-        memcpy(buffer, &peer.s6.sin6_port, sizeof(peer.s6.sin6_port));
-        memcpy(buffer + sizeof(peer.s6.sin6_port),
-               &peer.s6.sin6_addr, sizeof(struct in6_addr));
-        break;
-#endif
-    default:
-        OPENSSL_assert(0);
-        break;
-    }
+    memcpy(buffer, &port, sizeof(port));
+    BIO_ADDR_rawaddress(peer, buffer + sizeof(port), NULL);
 
     /* Calculate HMAC of buffer using the secret */
     HMAC(EVP_sha1(), cookie_secret, COOKIE_SECRET_LENGTH,
-         buffer, length, result, &resultlength);
-    OPENSSL_free(buffer);
+         buffer, length, cookie, cookie_len);
 
-    memcpy(cookie, result, resultlength);
-    *cookie_len = resultlength;
+    OPENSSL_free(buffer);
+    BIO_ADDR_free(peer);
 
     return 1;
 }
@@ -809,71 +789,20 @@ int generate_cookie_callback(SSL *ssl, unsigned char *cookie,
 int verify_cookie_callback(SSL *ssl, const unsigned char *cookie,
                            unsigned int cookie_len)
 {
-    unsigned char *buffer, result[EVP_MAX_MD_SIZE];
-    unsigned int length, resultlength;
-    union {
-        struct sockaddr sa;
-        struct sockaddr_in s4;
-#if OPENSSL_USE_IPV6
-        struct sockaddr_in6 s6;
-#endif
-    } peer;
+    unsigned char result[EVP_MAX_MD_SIZE];
+    unsigned int resultlength;
 
-    /* If secret isn't initialized yet, the cookie can't be valid */
-    if (!cookie_initialized)
-        return 0;
-
-    /* Read peer information */
-    (void)BIO_dgram_get_peer(SSL_get_rbio(ssl), &peer);
-
-    /* Create buffer with peer's address and port */
-    length = 0;
-    switch (peer.sa.sa_family) {
-    case AF_INET:
-        length += sizeof(struct in_addr);
-        length += sizeof(peer.s4.sin_port);
-        break;
-#if OPENSSL_USE_IPV6
-    case AF_INET6:
-        length += sizeof(struct in6_addr);
-        length += sizeof(peer.s6.sin6_port);
-        break;
-#endif
-    default:
-        OPENSSL_assert(0);
-        break;
-    }
-    buffer = app_malloc(length, "cookie verify buffer");
-
-    switch (peer.sa.sa_family) {
-    case AF_INET:
-        memcpy(buffer, &peer.s4.sin_port, sizeof(peer.s4.sin_port));
-        memcpy(buffer + sizeof(peer.s4.sin_port),
-               &peer.s4.sin_addr, sizeof(struct in_addr));
-        break;
-#if OPENSSL_USE_IPV6
-    case AF_INET6:
-        memcpy(buffer, &peer.s6.sin6_port, sizeof(peer.s6.sin6_port));
-        memcpy(buffer + sizeof(peer.s6.sin6_port),
-               &peer.s6.sin6_addr, sizeof(struct in6_addr));
-        break;
-#endif
-    default:
-        OPENSSL_assert(0);
-        break;
-    }
-
-    /* Calculate HMAC of buffer using the secret */
-    HMAC(EVP_sha1(), cookie_secret, COOKIE_SECRET_LENGTH,
-         buffer, length, result, &resultlength);
-    OPENSSL_free(buffer);
-
-    if (cookie_len == resultlength
+    /* Note: we check cookie_initialized because if it's not,
+     * it cannot be valid */
+    if (cookie_initialized
+        && generate_cookie_callback(ssl, result, &resultlength)
+        && cookie_len == resultlength
         && memcmp(result, cookie, resultlength) == 0)
         return 1;
 
     return 0;
 }
+#endif
 
 /*
  * Example of extended certificate handling. Where the standard support of
@@ -903,7 +832,7 @@ static STRINT_PAIR chain_flags[] = {
     {"CA signature", CERT_PKEY_CA_SIGNATURE},
     {"EE key parameters", CERT_PKEY_EE_PARAM},
     {"CA key parameters", CERT_PKEY_CA_PARAM},
-    {"Explicity sign with EE key", CERT_PKEY_EXPLICIT_SIGN},
+    {"Explicitly sign with EE key", CERT_PKEY_EXPLICIT_SIGN},
     {"Issuer Name", CERT_PKEY_ISSUER_NAME},
     {"Certificate Type", CERT_PKEY_CERT_TYPE},
     {NULL}
@@ -1044,7 +973,7 @@ int load_excert(SSL_EXCERT **pexc)
             return 0;
         }
         exc->cert = load_cert(exc->certfile, exc->certform,
-                              NULL, NULL, "Server Certificate");
+                              "Server Certificate");
         if (!exc->cert)
             return 0;
         if (exc->keyfile) {
@@ -1057,9 +986,8 @@ int load_excert(SSL_EXCERT **pexc)
         if (!exc->key)
             return 0;
         if (exc->chainfile) {
-            exc->chain = load_certs(exc->chainfile, FORMAT_PEM,
-                                    NULL, NULL, "Server Chain");
-            if (!exc->chain)
+            if (!load_certs(exc->chainfile, &exc->chain, FORMAT_PEM, NULL,
+                            "Server Chain"))
                 return 0;
         }
     }
@@ -1134,11 +1062,12 @@ int args_excert(int opt, SSL_EXCERT **pexc)
 static void print_raw_cipherlist(SSL *s)
 {
     const unsigned char *rlist;
-    static const unsigned char scsv_id[] = { 0, 0, 0xFF };
+    static const unsigned char scsv_id[] = { 0, 0xFF };
     size_t i, rlistlen, num;
     if (!SSL_is_server(s))
         return;
     num = SSL_get0_raw_cipherlist(s, NULL);
+    OPENSSL_assert(num == 2);
     rlistlen = SSL_get0_raw_cipherlist(s, &rlist);
     BIO_puts(bio_err, "Client cipher list: ");
     for (i = 0; i < rlistlen; i += num, rlist += num) {
@@ -1147,7 +1076,7 @@ static void print_raw_cipherlist(SSL *s)
             BIO_puts(bio_err, ":");
         if (c)
             BIO_puts(bio_err, SSL_CIPHER_get_name(c));
-        else if (!memcmp(rlist, scsv_id - num + 3, num))
+        else if (!memcmp(rlist, scsv_id, num))
             BIO_puts(bio_err, "SCSV");
         else {
             size_t j;
@@ -1157,6 +1086,80 @@ static void print_raw_cipherlist(SSL *s)
         }
     }
     BIO_puts(bio_err, "\n");
+}
+
+/*
+ * Hex encoder for TLSA RRdata, not ':' delimited.
+ */
+static char *hexencode(const unsigned char *data, size_t len)
+{
+    static const char *hex = "0123456789abcdef";
+    char *out;
+    char *cp;
+    size_t outlen = 2 * len + 1;
+    int ilen = (int) outlen;
+
+    if (outlen < len || ilen < 0 || outlen != (size_t)ilen) {
+        BIO_printf(bio_err, "%s: %" PRIu64 "-byte buffer too large to hexencode\n",
+                   opt_getprog(), (uint64_t)len);
+        exit(1);
+    }
+    cp = out = app_malloc(ilen, "TLSA hex data buffer");
+
+    while (len-- > 0) {
+        *cp++ = hex[(*data >> 4) & 0x0f];
+        *cp++ = hex[*data++ & 0x0f];
+    }
+    *cp = '\0';
+    return out;
+}
+
+void print_verify_detail(SSL *s, BIO *bio)
+{
+    int mdpth;
+    EVP_PKEY *mspki;
+    long verify_err = SSL_get_verify_result(s);
+
+    if (verify_err == X509_V_OK) {
+        const char *peername = SSL_get0_peername(s);
+
+        BIO_printf(bio, "Verification: OK\n");
+        if (peername != NULL)
+            BIO_printf(bio, "Verified peername: %s\n", peername);
+    } else {
+        const char *reason = X509_verify_cert_error_string(verify_err);
+
+        BIO_printf(bio, "Verification error: %s\n", reason);
+    }
+
+    if ((mdpth = SSL_get0_dane_authority(s, NULL, &mspki)) >= 0) {
+        uint8_t usage, selector, mtype;
+        const unsigned char *data = NULL;
+        size_t dlen = 0;
+        char *hexdata;
+
+        mdpth = SSL_get0_dane_tlsa(s, &usage, &selector, &mtype, &data, &dlen);
+
+        /*
+         * The TLSA data field can be quite long when it is a certificate,
+         * public key or even a SHA2-512 digest.  Because the initial octets of
+         * ASN.1 certificates and public keys contain mostly boilerplate OIDs
+         * and lengths, we show the last 12 bytes of the data instead, as these
+         * are more likely to distinguish distinct TLSA records.
+         */
+#define TLSA_TAIL_SIZE 12
+        if (dlen > TLSA_TAIL_SIZE)
+            hexdata = hexencode(data + dlen - TLSA_TAIL_SIZE, TLSA_TAIL_SIZE);
+        else
+            hexdata = hexencode(data, dlen);
+        BIO_printf(bio, "DANE TLSA %d %d %d %s%s %s at depth %d\n",
+                   usage, selector, mtype,
+                   (dlen > TLSA_TAIL_SIZE) ? "..." : "", hexdata,
+                   (mspki != NULL) ? "signed the certificate" :
+                   mdpth ? "matched TA certificate" : "matched EE certificate",
+                   mdpth);
+        OPENSSL_free(hexdata);
+    }
 }
 
 void print_ssl_summary(SSL *s)
@@ -1173,12 +1176,14 @@ void print_ssl_summary(SSL *s)
     peer = SSL_get_peer_certificate(s);
     if (peer) {
         int nid;
+
         BIO_puts(bio_err, "Peer certificate: ");
         X509_NAME_print_ex(bio_err, X509_get_subject_name(peer),
                            0, XN_FLAG_ONELINE);
         BIO_puts(bio_err, "\n");
         if (SSL_get_peer_signature_nid(s, &nid))
             BIO_printf(bio_err, "Hash used: %s\n", OBJ_nid2sn(nid));
+        print_verify_detail(s, bio_err);
     } else
         BIO_puts(bio_err, "No peer certificate\n");
     X509_free(peer);
@@ -1195,7 +1200,7 @@ void print_ssl_summary(SSL *s)
 }
 
 int config_ctx(SSL_CONF_CTX *cctx, STACK_OF(OPENSSL_STRING) *str,
-               SSL_CTX *ctx, int no_ecdhe, int no_jpake)
+               SSL_CTX *ctx)
 {
     int i;
 
@@ -1203,15 +1208,6 @@ int config_ctx(SSL_CONF_CTX *cctx, STACK_OF(OPENSSL_STRING) *str,
     for (i = 0; i < sk_OPENSSL_STRING_num(str); i += 2) {
         const char *flag = sk_OPENSSL_STRING_value(str, i);
         const char *arg = sk_OPENSSL_STRING_value(str, i + 1);
-        /* If no_ecdhe or named curve already specified don't need a default. */
-        if (!no_ecdhe && strcmp(flag, "-named_curve") == 0)
-            no_ecdhe = 1;
-#ifndef OPENSSL_NO_JPAKE
-        if (!no_jpake && (strcmp(flag, "-cipher") == 0)) {
-            BIO_puts(bio_err, "JPAKE sets cipher to PSK\n");
-            return 0;
-        }
-#endif
         if (SSL_CONF_cmd(cctx, flag, arg) <= 0) {
             if (arg)
                 BIO_printf(bio_err, "Error with command: \"%s %s\"\n",
@@ -1222,27 +1218,6 @@ int config_ctx(SSL_CONF_CTX *cctx, STACK_OF(OPENSSL_STRING) *str,
             return 0;
         }
     }
-    /*
-     * This is a special case to keep existing s_server functionality: if we
-     * don't have any curve specified *and* we haven't disabled ECDHE then
-     * use P-256.
-     */
-    if (!no_ecdhe) {
-        if (SSL_CONF_cmd(cctx, "-named_curve", "P-256") <= 0) {
-            BIO_puts(bio_err, "Error setting EC curve\n");
-            ERR_print_errors(bio_err);
-            return 0;
-        }
-    }
-#ifndef OPENSSL_NO_JPAKE
-    if (!no_jpake) {
-        if (SSL_CONF_cmd(cctx, "-cipher", "PSK") <= 0) {
-            BIO_puts(bio_err, "Error setting cipher to PSK\n");
-            ERR_print_errors(bio_err);
-            return 0;
-        }
-    }
-#endif
     if (!SSL_CONF_CTX_finish(cctx)) {
         BIO_puts(bio_err, "Error finishing context\n");
         ERR_print_errors(bio_err);
@@ -1279,8 +1254,10 @@ int ssl_load_stores(SSL_CTX *ctx,
 {
     X509_STORE *vfy = NULL, *ch = NULL;
     int rv = 0;
-    if (vfyCApath || vfyCAfile) {
+    if (vfyCApath != NULL || vfyCAfile != NULL) {
         vfy = X509_STORE_new();
+        if (vfy == NULL)
+            goto err;
         if (!X509_STORE_load_locations(vfy, vfyCAfile, vfyCApath))
             goto err;
         add_crls_store(vfy, crls);
@@ -1288,8 +1265,10 @@ int ssl_load_stores(SSL_CTX *ctx,
         if (crl_download)
             store_setup_crl_download(vfy);
     }
-    if (chCApath || chCAfile) {
+    if (chCApath != NULL || chCAfile != NULL) {
         ch = X509_STORE_new();
+        if (ch == NULL)
+            goto err;
         if (!X509_STORE_load_locations(ch, chCAfile, chCApath))
             goto err;
         SSL_CTX_set1_chain_cert_store(ctx, ch);
@@ -1306,7 +1285,7 @@ int ssl_load_stores(SSL_CTX *ctx,
 typedef struct {
     BIO *out;
     int verbose;
-    int (*old_cb) (SSL *s, SSL_CTX *ctx, int op, int bits, int nid,
+    int (*old_cb) (const SSL *s, const SSL_CTX *ctx, int op, int bits, int nid,
                    void *other, void *ex);
 } security_debug_ex;
 
@@ -1335,7 +1314,7 @@ static STRINT_PAIR callback_types[] = {
     {NULL}
 };
 
-static int security_callback_debug(SSL *s, SSL_CTX *ctx,
+static int security_callback_debug(const SSL *s, const SSL_CTX *ctx,
                                    int op, int bits, int nid,
                                    void *other, void *ex)
 {
@@ -1388,7 +1367,7 @@ static int security_callback_debug(SSL *s, SSL_CTX *ctx,
     case SSL_SECOP_OTHER_DH:
         {
             DH *dh = other;
-            BIO_printf(sdb->out, "%d", BN_num_bits(dh->p));
+            BIO_printf(sdb->out, "%d", DH_bits(dh));
             break;
         }
 #endif
@@ -1398,13 +1377,12 @@ static int security_callback_debug(SSL *s, SSL_CTX *ctx,
                 int sig_nid = X509_get_signature_nid(other);
                 BIO_puts(sdb->out, OBJ_nid2sn(sig_nid));
             } else {
-                EVP_PKEY *pkey = X509_get_pubkey(other);
+                EVP_PKEY *pkey = X509_get0_pubkey(other);
                 const char *algname = "";
                 EVP_PKEY_asn1_get0_info(NULL, NULL, NULL, NULL,
                                         &algname, EVP_PKEY_get0_asn1(pkey));
                 BIO_printf(sdb->out, "%s, bits=%d",
                            algname, EVP_PKEY_bits(pkey));
-                EVP_PKEY_free(pkey);
             }
             break;
         }

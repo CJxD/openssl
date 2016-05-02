@@ -1,4 +1,3 @@
-/* a_strnid.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -235,16 +234,16 @@ static ASN1_STRING_TABLE *stable_get(int nid)
 {
     ASN1_STRING_TABLE *tmp, *rv;
     /* Always need a string table so allocate one if NULL */
-    if (!stable) {
+    if (stable == NULL) {
         stable = sk_ASN1_STRING_TABLE_new(sk_table_cmp);
-        if (!stable)
+        if (stable == NULL)
             return NULL;
     }
     tmp = ASN1_STRING_TABLE_get(nid);
     if (tmp && tmp->flags & STABLE_FLAGS_MALLOC)
         return tmp;
     rv = OPENSSL_malloc(sizeof(*rv));
-    if (!rv)
+    if (rv == NULL)
         return NULL;
     if (!sk_ASN1_STRING_TABLE_push(stable, rv)) {
         OPENSSL_free(rv);

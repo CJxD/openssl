@@ -1,4 +1,3 @@
-/* crypto/rand/randtest.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -190,9 +189,5 @@ int main(int argc, char **argv)
     printf("test 4 done\n");
  err:
     err = ((err) ? 1 : 0);
-#ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-#endif
     EXIT(err);
 }

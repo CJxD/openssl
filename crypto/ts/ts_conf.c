@@ -1,4 +1,3 @@
-/* crypto/ts/ts_conf.c */
 /*
  * Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL project
  * 2002.
@@ -62,9 +61,7 @@
 #include <openssl/crypto.h>
 #include "internal/cryptlib.h"
 #include <openssl/pem.h>
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
+#include <openssl/engine.h>
 #include <openssl/ts.h>
 
 /* Macro definitions for the configuration file. */
@@ -75,6 +72,7 @@
 #define ENV_SIGNER_CERT                 "signer_cert"
 #define ENV_CERTS                       "certs"
 #define ENV_SIGNER_KEY                  "signer_key"
+#define ENV_SIGNER_DIGEST               "signer_digest"
 #define ENV_DEFAULT_POLICY              "default_policy"
 #define ENV_OTHER_POLICIES              "other_policies"
 #define ENV_DIGESTS                     "digests"
@@ -301,6 +299,30 @@ int TS_CONF_set_signer_key(CONF *conf, const char *section,
     ret = 1;
  err:
     EVP_PKEY_free(key_obj);
+    return ret;
+}
+
+int TS_CONF_set_signer_digest(CONF *conf, const char *section,
+                              const char *md, TS_RESP_CTX *ctx)
+{
+    int ret = 0;
+    const EVP_MD *sign_md = NULL;
+    if (md == NULL)
+        md = NCONF_get_string(conf, section, ENV_SIGNER_DIGEST);
+    if (md == NULL) {
+        ts_CONF_lookup_fail(section, ENV_SIGNER_DIGEST);
+        goto err;
+    }
+    sign_md = EVP_get_digestbyname(md);
+    if (sign_md == NULL) {
+        ts_CONF_invalid(section, ENV_SIGNER_DIGEST);
+        goto err;
+    }
+    if (!TS_RESP_CTX_set_signer_digest(ctx, sign_md))
+        goto err;
+
+    ret = 1;
+ err:
     return ret;
 }
 

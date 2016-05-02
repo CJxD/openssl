@@ -1,4 +1,3 @@
-/* ssl/record/ssl3_buffer.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -121,16 +120,13 @@ void SSL3_BUFFER_set_data(SSL3_BUFFER *b, const unsigned char *d, int n)
 }
 
 /*
- * Clear the contents of an SSL3_BUFFER but retain any memory allocated
+ * Clear the contents of an SSL3_BUFFER but retain any memory allocated. Also
+ * retains the default_len setting
  */
 void SSL3_BUFFER_clear(SSL3_BUFFER *b)
 {
-    unsigned char *buf = b->buf;
-    size_t len = b->len;
-
-    memset(b, 0, sizeof(*b));
-    b->buf = buf;
-    b->len = len;
+    b->offset = 0;
+    b->left = 0;
 }
 
 void SSL3_BUFFER_release(SSL3_BUFFER *b)
@@ -159,14 +155,12 @@ int ssl3_setup_read_buffer(SSL *s)
     if (b->buf == NULL) {
         len = SSL3_RT_MAX_PLAIN_LENGTH
             + SSL3_RT_MAX_ENCRYPTED_OVERHEAD + headerlen + align;
-        if (s->options & SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER) {
-            s->s3->init_extra = 1;
-            len += SSL3_RT_MAX_EXTRA;
-        }
 #ifndef OPENSSL_NO_COMP
         if (ssl_allow_compression(s))
             len += SSL3_RT_MAX_COMPRESSED_OVERHEAD;
 #endif
+        if (b->default_len > len)
+            len = b->default_len;
         if ((p = OPENSSL_malloc(len)) == NULL)
             goto err;
         b->buf = p;
@@ -181,13 +175,15 @@ int ssl3_setup_read_buffer(SSL *s)
     return 0;
 }
 
-int ssl3_setup_write_buffer(SSL *s)
+int ssl3_setup_write_buffer(SSL *s, unsigned int numwpipes)
 {
     unsigned char *p;
     size_t len, align = 0, headerlen;
     SSL3_BUFFER *wb;
+    unsigned int currpipe;
 
-    wb = RECORD_LAYER_get_wbuf(&s->rlayer);
+    s->rlayer.numwpipes = numwpipes;
+
 
     if (SSL_IS_DTLS(s))
         headerlen = DTLS1_RT_HEADER_LENGTH + 1;
@@ -198,20 +194,25 @@ int ssl3_setup_write_buffer(SSL *s)
     align = (-SSL3_RT_HEADER_LENGTH) & (SSL3_ALIGN_PAYLOAD - 1);
 #endif
 
-    if (wb->buf == NULL) {
-        len = s->max_send_fragment
-            + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD + headerlen + align;
+    len = s->max_send_fragment
+        + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD + headerlen + align;
 #ifndef OPENSSL_NO_COMP
-        if (ssl_allow_compression(s))
-            len += SSL3_RT_MAX_COMPRESSED_OVERHEAD;
+    if (ssl_allow_compression(s))
+        len += SSL3_RT_MAX_COMPRESSED_OVERHEAD;
 #endif
-        if (!(s->options & SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS))
-            len += headerlen + align + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD;
+    if (!(s->options & SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS))
+        len += headerlen + align + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD;
 
-        if ((p = OPENSSL_malloc(len)) == NULL)
-            goto err;
-        wb->buf = p;
-        wb->len = len;
+    wb = RECORD_LAYER_get_wbuf(&s->rlayer);
+    for (currpipe = 0; currpipe < numwpipes; currpipe++) {
+        if (wb[currpipe].buf == NULL) {
+            if ((p = OPENSSL_malloc(len)) == NULL) {
+                s->rlayer.numwpipes = currpipe;
+                goto err;
+            }
+            wb[currpipe].buf = p;
+            wb[currpipe].len = len;
+        }
     }
 
     return 1;
@@ -225,7 +226,7 @@ int ssl3_setup_buffers(SSL *s)
 {
     if (!ssl3_setup_read_buffer(s))
         return 0;
-    if (!ssl3_setup_write_buffer(s))
+    if (!ssl3_setup_write_buffer(s, 1))
         return 0;
     return 1;
 }
@@ -233,11 +234,17 @@ int ssl3_setup_buffers(SSL *s)
 int ssl3_release_write_buffer(SSL *s)
 {
     SSL3_BUFFER *wb;
+    unsigned int pipes;
 
-    wb = RECORD_LAYER_get_wbuf(&s->rlayer);
+    pipes = s->rlayer.numwpipes;
+    while (pipes > 0) {
+        wb = &RECORD_LAYER_get_wbuf(&s->rlayer)[pipes - 1];
 
-    OPENSSL_free(wb->buf);
-    wb->buf = NULL;
+        OPENSSL_free(wb->buf);
+        wb->buf = NULL;
+        pipes--;
+    }
+    s->rlayer.numwpipes = 0;
     return 1;
 }
 

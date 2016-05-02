@@ -1,4 +1,3 @@
-/* conf_mod.c */
 /*
  * Written by Stephen Henson (steve@openssl.org) for the OpenSSL project
  * 2001.
@@ -61,8 +60,8 @@
 #include <ctype.h>
 #include <openssl/crypto.h>
 #include "internal/cryptlib.h"
-#include <openssl/conf.h>
-#include <openssl/dso.h>
+#include "internal/conf.h"
+#include "internal/dso.h"
 #include <openssl/x509.h>
 
 #define DSO_mod_init_name "OPENSSL_init"
@@ -114,8 +113,7 @@ static CONF_MODULE *module_add(DSO *dso, const char *name,
 static CONF_MODULE *module_find(char *name);
 static int module_init(CONF_MODULE *pmod, char *name, char *value,
                        const CONF *cnf);
-static CONF_MODULE *module_load_dso(const CONF *cnf, char *name, char *value,
-                                    unsigned long flags);
+static CONF_MODULE *module_load_dso(const CONF *cnf, char *name, char *value);
 
 /* Main function: load modules from a CONF structure */
 
@@ -166,7 +164,7 @@ int CONF_modules_load_file(const char *filename, const char *appname,
     CONF *conf = NULL;
     int ret = 0;
     conf = NCONF_new(NULL);
-    if (!conf)
+    if (conf == NULL)
         goto err;
 
     if (filename == NULL) {
@@ -205,7 +203,7 @@ static int module_run(const CONF *cnf, char *name, char *value,
 
     /* Module not found: try to load DSO */
     if (!md && !(flags & CONF_MFLAGS_NO_DSO))
-        md = module_load_dso(cnf, name, value, flags);
+        md = module_load_dso(cnf, name, value);
 
     if (!md) {
         if (!(flags & CONF_MFLAGS_SILENT)) {
@@ -231,8 +229,7 @@ static int module_run(const CONF *cnf, char *name, char *value,
 }
 
 /* Load a module from a DSO */
-static CONF_MODULE *module_load_dso(const CONF *cnf, char *name, char *value,
-                                    unsigned long flags)
+static CONF_MODULE *module_load_dso(const CONF *cnf, char *name, char *value)
 {
     DSO *dso = NULL;
     conf_init_func *ifunc;
@@ -286,7 +283,7 @@ static CONF_MODULE *module_add(DSO *dso, const char *name,
         return NULL;
 
     tmod->dso = dso;
-    tmod->name = BUF_strdup(name);
+    tmod->name = OPENSSL_strdup(name);
     tmod->init = ifunc;
     tmod->finish = ffunc;
 
@@ -336,12 +333,12 @@ static int module_init(CONF_MODULE *pmod, char *name, char *value,
 
     /* Otherwise add initialized module to list */
     imod = OPENSSL_malloc(sizeof(*imod));
-    if (!imod)
+    if (imod == NULL)
         goto err;
 
     imod->pmod = pmod;
-    imod->name = BUF_strdup(name);
-    imod->value = BUF_strdup(value);
+    imod->name = OPENSSL_strdup(name);
+    imod->value = OPENSSL_strdup(value);
     imod->usr_data = NULL;
 
     if (!imod->name || !imod->value)
@@ -463,7 +460,7 @@ int CONF_module_add(const char *name, conf_init_func *ifunc,
         return 0;
 }
 
-void CONF_modules_free(void)
+void conf_modules_free_int(void)
 {
     CONF_modules_finish();
     CONF_modules_unload(1);
@@ -525,7 +522,7 @@ char *CONF_get1_default_config_file(void)
 
     file = getenv("OPENSSL_CONF");
     if (file)
-        return BUF_strdup(file);
+        return OPENSSL_strdup(file);
 
     len = strlen(X509_get_default_cert_area());
 #ifndef OPENSSL_SYS_VMS
@@ -535,13 +532,13 @@ char *CONF_get1_default_config_file(void)
 
     file = OPENSSL_malloc(len + 1);
 
-    if (!file)
+    if (file == NULL)
         return NULL;
-    BUF_strlcpy(file, X509_get_default_cert_area(), len + 1);
+    OPENSSL_strlcpy(file, X509_get_default_cert_area(), len + 1);
 #ifndef OPENSSL_SYS_VMS
-    BUF_strlcat(file, "/", len + 1);
+    OPENSSL_strlcat(file, "/", len + 1);
 #endif
-    BUF_strlcat(file, OPENSSL_CONF, len + 1);
+    OPENSSL_strlcat(file, OPENSSL_CONF, len + 1);
 
     return file;
 }

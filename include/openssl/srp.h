@@ -1,4 +1,3 @@
-/* crypto/srp/srp.h */
 /*
  * Written by Christophe Renou (christophe.renou@edelweb.fr) with the
  * precious help of Peter Sylvester (peter.sylvester@edelweb.fr) for the
@@ -57,25 +56,21 @@
  * Hudson (tjh@cryptsoft.com).
  *
  */
-#ifndef __SRP_H__
-# define __SRP_H__
+#ifndef HEADER_SRP_H
+# define HEADER_SRP_H
 
 #include <openssl/opensslconf.h>
 
-# ifdef OPENSSL_NO_SRP
-#  error SRP is disabled.
-# endif
-
+#ifndef OPENSSL_NO_SRP
 # include <stdio.h>
 # include <string.h>
-
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
 # include <openssl/safestack.h>
 # include <openssl/bn.h>
 # include <openssl/crypto.h>
+
+# ifdef  __cplusplus
+extern "C" {
+# endif
 
 typedef struct SRP_gN_cache_st {
     char *b64_bn;
@@ -83,18 +78,23 @@ typedef struct SRP_gN_cache_st {
 } SRP_gN_cache;
 
 
-DECLARE_STACK_OF(SRP_gN_cache)
+DEFINE_STACK_OF(SRP_gN_cache)
 
 typedef struct SRP_user_pwd_st {
+    /* Owned by us. */
     char *id;
     BIGNUM *s;
     BIGNUM *v;
+    /* Not owned by us. */
     const BIGNUM *g;
     const BIGNUM *N;
+    /* Owned by us. */
     char *info;
 } SRP_user_pwd;
 
-DECLARE_STACK_OF(SRP_user_pwd)
+void SRP_user_pwd_free(SRP_user_pwd *user_pwd);
+
+DEFINE_STACK_OF(SRP_user_pwd)
 
 typedef struct SRP_VBASE_st {
     STACK_OF(SRP_user_pwd) *users_pwd;
@@ -106,7 +106,7 @@ typedef struct SRP_VBASE_st {
 } SRP_VBASE;
 
 /*
- * Structure interne pour retenir les couples N et g
+ * Internal structure storing N and g pair 
  */
 typedef struct SRP_gN_st {
     char *id;
@@ -114,12 +114,17 @@ typedef struct SRP_gN_st {
     BIGNUM *N;
 } SRP_gN;
 
-DECLARE_STACK_OF(SRP_gN)
+DEFINE_STACK_OF(SRP_gN)
 
 SRP_VBASE *SRP_VBASE_new(char *seed_key);
 void SRP_VBASE_free(SRP_VBASE *vb);
 int SRP_VBASE_init(SRP_VBASE *vb, char *verifier_file);
-SRP_user_pwd *SRP_VBASE_get_by_user(SRP_VBASE *vb, char *username);
+
+/* This method ignores the configured seed and fails for an unknown user. */
+DEPRECATEDIN_1_1_0(SRP_user_pwd *SRP_VBASE_get_by_user(SRP_VBASE *vb, char *username))
+/* NOTE: unlike in SRP_VBASE_get_by_user, caller owns the returned pointer.*/
+SRP_user_pwd *SRP_VBASE_get1_by_user(SRP_VBASE *vb, char *username);
+
 char *SRP_create_verifier(const char *user, const char *pass, char **salt,
                           char **verifier, const char *N, const char *g);
 int SRP_create_verifier_BN(const char *user, const char *pass, BIGNUM **salt,
@@ -166,8 +171,9 @@ int SRP_Verify_B_mod_N(BIGNUM *B, BIGNUM *N);
 
 # define SRP_MINIMAL_N 1024
 
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
 
 #endif

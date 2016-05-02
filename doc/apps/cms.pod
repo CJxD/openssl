@@ -7,6 +7,7 @@ cms - CMS utility
 =head1 SYNOPSIS
 
 B<openssl> B<cms>
+[B<-help>]
 [B<-encrypt>]
 [B<-decrypt>]
 [B<-sign>]
@@ -46,7 +47,7 @@ B<openssl> B<cms>
 [B<-ignore_critical>]
 [B<-inhibit_any>]
 [B<-inhibit_map>]
-[B<-issuer_checks>]
+[B<-no_check_time>]
 [B<-partial_chain>]
 [B<-policy arg>]
 [B<-policy_check>]
@@ -58,6 +59,7 @@ B<openssl> B<cms>
 [B<-trusted_first>]
 [B<-no_alt_chains>]
 [B<-use_deltas>]
+[B<-auth_level num>]
 [B<-verify_depth num>]
 [B<-verify_email email>]
 [B<-verify_hostname hostname>]
@@ -108,6 +110,10 @@ performed. The meaning of the other options varies according to the operation
 type.
 
 =over 4
+
+=item B<-help>
+
+Print out a usage message.
 
 =item B<-encrypt>
 
@@ -292,7 +298,7 @@ default digest algorithm for the signing key will be used (usually SHA1).
 the encryption algorithm to use. For example triple DES (168 bits) - B<-des3>
 or 256 bit AES - B<-aes256>. Any standard algorithm name (as used by the
 EVP_get_cipherbyname() function) can also be used preceded by a dash, for 
-example B<-aes_128_cbc>. See L<B<enc>|enc(1)> for a list of ciphers
+example B<-aes-128-cbc>. See L<B<enc>|enc(1)> for a list of ciphers
 supported by your version of OpenSSL.
 
 If not specified triple DES is used. Only used with B<-encrypt> and 
@@ -450,7 +456,7 @@ see the B<PASS PHRASE ARGUMENTS> section in L<openssl(1)>.
 
 a file or files containing random data used to seed the random number
 generator, or an EGD socket (see L<RAND_egd(3)>).
-Multiple files can be specified separated by a OS-dependent character.
+Multiple files can be specified separated by an OS-dependent character.
 The separator is B<;> for MS-Windows, B<,> for OpenVMS, and B<:> for
 all others.
 
@@ -467,11 +473,11 @@ then many S/MIME mail clients check the signers certificate's email
 address matches that specified in the From: address.
 
 =item B<-attime>, B<-check_ss_sig>, B<-crl_check>, B<-crl_check_all>,
-B<explicit_policy>, B<-extended_crl>, B<-ignore_critical>, B<-inhibit_any>,
-B<-inhibit_map>, B<-issuer_checks>, B<-partial_chain>, B<-policy>,
+B<-explicit_policy>, B<-extended_crl>, B<-ignore_critical>, B<-inhibit_any>,
+B<-inhibit_map>, B<-no_alt_chains>, B<-no_check_time>, B<-partial_chain>, B<-policy>,
 B<-policy_check>, B<-policy_print>, B<-purpose>, B<-suiteB_128>,
-B<-suiteB_128_only>, B<-suiteB_192>, B<-trusted_first>, B<-no_alt_chains>,
-B<-use_deltas>, B<-verify_depth>, B<-verify_email>, B<-verify_hostname>,
+B<-suiteB_128_only>, B<-suiteB_192>, B<-trusted_first>, B<-use_deltas>,
+B<-auth_level>, B<-verify_depth>, B<-verify_email>, B<-verify_hostname>,
 B<-verify_ip>, B<-verify_name>, B<-x509_strict>
 
 Set various certificate chain validation options. See the
@@ -508,7 +514,7 @@ The B<-resign> option uses an existing message digest when adding a new
 signer. This means that attributes must be present in at least one existing
 signer using the same message digest or this operation will fail.
 
-The B<-stream> and B<-indef> options enable experimental streaming I/O support.
+The B<-stream> and B<-indef> options enable streaming I/O support.
 As a result the encoding is BER using indefinite length constructed encoding
 and no longer DER. Streaming is supported for the B<-encrypt> operation and the
 B<-sign> operation if the content is not detached.

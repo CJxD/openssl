@@ -1,4 +1,3 @@
-/* crypto/bf/bftest.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -81,7 +80,7 @@ int main(int argc, char *argv[])
 #  include <openssl/ebcdic.h>
 # endif
 
-static char *bf_key[2] = {
+static char bf_key[2][30] = {
     "abcdefghijklmnopqrstuvwxyz",
     "Who is John Galt?"
 };
@@ -289,10 +288,6 @@ int main(int argc, char *argv[])
     else
         ret = test();
 
-# ifdef OPENSSL_SYS_NETWARE
-    if (ret)
-        printf("ERROR: %d\n", ret);
-# endif
     EXIT(ret);
 }
 

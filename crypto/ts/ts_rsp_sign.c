@@ -1,4 +1,3 @@
-/* crypto/ts/ts_resp_sign.c */
 /*
  * Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL project
  * 2002.
@@ -96,7 +95,7 @@ static ASN1_INTEGER *def_serial_cb(struct TS_resp_ctx *ctx, void *data)
 {
     ASN1_INTEGER *serial = ASN1_INTEGER_new();
 
-    if (!serial)
+    if (serial == NULL)
         goto err;
     if (!ASN1_INTEGER_set(serial, 1))
         goto err;
@@ -169,6 +168,8 @@ TS_RESP_CTX *TS_RESP_CTX_new()
         return NULL;
     }
 
+    ctx->signer_md = EVP_sha256();
+
     ctx->serial_cb = def_serial_cb;
     ctx->time_cb = def_time_cb;
     ctx->extension_cb = def_extension_cb;
@@ -210,8 +211,14 @@ int TS_RESP_CTX_set_signer_key(TS_RESP_CTX *ctx, EVP_PKEY *key)
 {
     EVP_PKEY_free(ctx->signer_key);
     ctx->signer_key = key;
-    CRYPTO_add(&ctx->signer_key->references, +1, CRYPTO_LOCK_EVP_PKEY);
+    EVP_PKEY_up_ref(ctx->signer_key);
 
+    return 1;
+}
+
+int TS_RESP_CTX_set_signer_digest(TS_RESP_CTX *ctx, const EVP_MD *md)
+{
+    ctx->signer_md = md;
     return 1;
 }
 
@@ -700,7 +707,7 @@ static int ts_RESP_sign(TS_RESP_CTX *ctx)
     }
 
     if ((si = PKCS7_add_signature(p7, ctx->signer_cert,
-                                  ctx->signer_key, EVP_sha1())) == NULL) {
+                                  ctx->signer_key, ctx->signer_md)) == NULL) {
         TSerr(TS_F_TS_RESP_SIGN, TS_R_PKCS7_ADD_SIGNATURE_ERROR);
         goto err;
     }
@@ -786,6 +793,7 @@ static ESS_CERT_ID *ess_CERT_ID_new_init(X509 *cert, int issuer_needed)
     GENERAL_NAME *name = NULL;
     unsigned char cert_sha1[SHA_DIGEST_LENGTH];
 
+    /* Call for side-effect of computing hash and caching extensions */
     X509_check_purpose(cert, -1, 0);
     if ((cid = ESS_CERT_ID_new()) == NULL)
         goto err;

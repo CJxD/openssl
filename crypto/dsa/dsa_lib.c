@@ -1,4 +1,3 @@
-/* crypto/dsa/dsa_lib.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -61,14 +60,10 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/bn.h>
-#include <openssl/dsa.h>
+#include "dsa_locl.h"
 #include <openssl/asn1.h>
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
-#ifndef OPENSSL_NO_DH
-# include <openssl/dh.h>
-#endif
+#include <openssl/engine.h>
+#include <openssl/dh.h>
 
 static const DSA_METHOD *default_DSA_method = NULL;
 
@@ -100,10 +95,8 @@ int DSA_set_method(DSA *dsa, const DSA_METHOD *meth)
     if (mtmp->finish)
         mtmp->finish(dsa);
 #ifndef OPENSSL_NO_ENGINE
-    if (dsa->engine) {
-        ENGINE_finish(dsa->engine);
-        dsa->engine = NULL;
-    }
+    ENGINE_finish(dsa->engine);
+    dsa->engine = NULL;
 #endif
     dsa->meth = meth;
     if (meth->init)
@@ -111,51 +104,60 @@ int DSA_set_method(DSA *dsa, const DSA_METHOD *meth)
     return 1;
 }
 
+const DSA_METHOD *DSA_get_method(DSA *d)
+{
+    return d->meth;
+}
+
 DSA *DSA_new_method(ENGINE *engine)
 {
-    DSA *ret;
+    DSA *ret = OPENSSL_zalloc(sizeof(*ret));
 
-    ret = OPENSSL_zalloc(sizeof(*ret));
     if (ret == NULL) {
         DSAerr(DSA_F_DSA_NEW_METHOD, ERR_R_MALLOC_FAILURE);
-        return (NULL);
+        return NULL;
     }
+
+    ret->references = 1;
+    ret->lock = CRYPTO_THREAD_lock_new();
+    if (ret->lock == NULL) {
+        OPENSSL_free(ret);
+        return NULL;
+    }
+
     ret->meth = DSA_get_default_method();
 #ifndef OPENSSL_NO_ENGINE
+    ret->flags = ret->meth->flags & ~DSA_FLAG_NON_FIPS_ALLOW; /* early default init */
     if (engine) {
         if (!ENGINE_init(engine)) {
             DSAerr(DSA_F_DSA_NEW_METHOD, ERR_R_ENGINE_LIB);
-            OPENSSL_free(ret);
-            return NULL;
+            goto err;
         }
         ret->engine = engine;
     } else
         ret->engine = ENGINE_get_default_DSA();
     if (ret->engine) {
         ret->meth = ENGINE_get_DSA(ret->engine);
-        if (!ret->meth) {
+        if (ret->meth == NULL) {
             DSAerr(DSA_F_DSA_NEW_METHOD, ERR_R_ENGINE_LIB);
-            ENGINE_finish(ret->engine);
-            OPENSSL_free(ret);
-            return NULL;
+            goto err;
         }
     }
 #endif
 
-    ret->references = 1;
     ret->flags = ret->meth->flags & ~DSA_FLAG_NON_FIPS_ALLOW;
-    CRYPTO_new_ex_data(CRYPTO_EX_INDEX_DSA, ret, &ret->ex_data);
+
+    if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_DSA, ret, &ret->ex_data))
+        goto err;
+
     if ((ret->meth->init != NULL) && !ret->meth->init(ret)) {
-#ifndef OPENSSL_NO_ENGINE
-        if (ret->engine)
-            ENGINE_finish(ret->engine);
-#endif
-        CRYPTO_free_ex_data(CRYPTO_EX_INDEX_DSA, ret, &ret->ex_data);
-        OPENSSL_free(ret);
+        DSAerr(DSA_F_DSA_NEW_METHOD, ERR_R_INIT_FAIL);
+err:
+        DSA_free(ret);
         ret = NULL;
     }
 
-    return (ret);
+    return ret;
 }
 
 void DSA_free(DSA *r)
@@ -165,50 +167,39 @@ void DSA_free(DSA *r)
     if (r == NULL)
         return;
 
-    i = CRYPTO_add(&r->references, -1, CRYPTO_LOCK_DSA);
-#ifdef REF_PRINT
-    REF_PRINT("DSA", r);
-#endif
+    CRYPTO_atomic_add(&r->references, -1, &i, r->lock);
+    REF_PRINT_COUNT("DSA", r);
     if (i > 0)
         return;
-#ifdef REF_CHECK
-    if (i < 0) {
-        fprintf(stderr, "DSA_free, bad reference count\n");
-        abort();
-    }
-#endif
+    REF_ASSERT_ISNT(i < 0);
 
     if (r->meth->finish)
         r->meth->finish(r);
 #ifndef OPENSSL_NO_ENGINE
-    if (r->engine)
-        ENGINE_finish(r->engine);
+    ENGINE_finish(r->engine);
 #endif
 
     CRYPTO_free_ex_data(CRYPTO_EX_INDEX_DSA, r, &r->ex_data);
+
+    CRYPTO_THREAD_lock_free(r->lock);
 
     BN_clear_free(r->p);
     BN_clear_free(r->q);
     BN_clear_free(r->g);
     BN_clear_free(r->pub_key);
     BN_clear_free(r->priv_key);
-    BN_clear_free(r->kinv);
-    BN_clear_free(r->r);
     OPENSSL_free(r);
 }
 
 int DSA_up_ref(DSA *r)
 {
-    int i = CRYPTO_add(&r->references, 1, CRYPTO_LOCK_DSA);
-#ifdef REF_PRINT
-    REF_PRINT("DSA", r);
-#endif
-#ifdef REF_CHECK
-    if (i < 2) {
-        fprintf(stderr, "DSA_up_ref, bad reference count\n");
-        abort();
-    }
-#endif
+    int i;
+
+    if (CRYPTO_atomic_add(&r->references, 1, &i, r->lock) <= 0)
+        return 0;
+
+    REF_PRINT_COUNT("DSA", r);
+    REF_ASSERT_ISNT(i < 2);
     return ((i > 1) ? 1 : 0);
 }
 
@@ -234,13 +225,6 @@ int DSA_size(const DSA *r)
     return (ret);
 }
 
-int DSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                         CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_DSA, argl, argp,
-                                   new_func, dup_func, free_func);
-}
-
 int DSA_set_ex_data(DSA *d, int idx, void *arg)
 {
     return (CRYPTO_set_ex_data(&d->ex_data, idx, arg));
@@ -253,7 +237,9 @@ void *DSA_get_ex_data(DSA *d, int idx)
 
 int DSA_security_bits(const DSA *d)
 {
-    return BN_security_bits(BN_num_bits(d->p), BN_num_bits(d->q));
+    if (d->p && d->q)
+        return BN_security_bits(BN_num_bits(d->p), BN_num_bits(d->q));
+    return -1;
 }
 
 #ifndef OPENSSL_NO_DH
@@ -265,34 +251,141 @@ DH *DSA_dup_DH(const DSA *r)
      */
 
     DH *ret = NULL;
+    BIGNUM *p = NULL, *q = NULL, *g = NULL, *pub_key = NULL, *priv_key = NULL;
 
     if (r == NULL)
         goto err;
     ret = DH_new();
     if (ret == NULL)
         goto err;
-    if (r->p != NULL)
-        if ((ret->p = BN_dup(r->p)) == NULL)
+    if (r->p != NULL || r->g != NULL || r->q != NULL) {
+        if (r->p == NULL || r->g == NULL || r->q == NULL) {
+            /* Shouldn't happen */
             goto err;
-    if (r->q != NULL) {
-        ret->length = BN_num_bits(r->q);
-        if ((ret->q = BN_dup(r->q)) == NULL)
+        }
+        p = BN_dup(r->p);
+        g = BN_dup(r->g);
+        q = BN_dup(r->q);
+        if (p == NULL || g == NULL || q == NULL || !DH_set0_pqg(ret, p, q, g))
             goto err;
+        p = g = q = NULL;
     }
-    if (r->g != NULL)
-        if ((ret->g = BN_dup(r->g)) == NULL)
+
+    if (r->pub_key != NULL) {
+        pub_key = BN_dup(r->pub_key);
+        if (pub_key == NULL)
             goto err;
-    if (r->pub_key != NULL)
-        if ((ret->pub_key = BN_dup(r->pub_key)) == NULL)
+        if (r->priv_key != NULL) {
+            priv_key = BN_dup(r->priv_key);
+            if (priv_key == NULL)
+                goto err;
+        }
+        if (!DH_set0_key(ret, pub_key, priv_key))
             goto err;
-    if (r->priv_key != NULL)
-        if ((ret->priv_key = BN_dup(r->priv_key)) == NULL)
-            goto err;
+    } else if (r->priv_key != NULL) {
+        /* Shouldn't happen */
+        goto err;
+    }
 
     return ret;
 
  err:
+    BN_free(p);
+    BN_free(g);
+    BN_free(q);
+    BN_free(pub_key);
+    BN_free(priv_key);
     DH_free(ret);
     return NULL;
 }
 #endif
+
+void DSA_get0_pqg(const DSA *d, BIGNUM **p, BIGNUM **q, BIGNUM **g)
+{
+    if (p != NULL)
+        *p = d->p;
+    if (q != NULL)
+        *q = d->q;
+    if (g != NULL)
+        *g = d->g;
+}
+
+int DSA_set0_pqg(DSA *d, BIGNUM *p, BIGNUM *q, BIGNUM *g)
+{
+    /* If the fields in d are NULL, the corresponding input
+     * parameters MUST be non-NULL.
+     *
+     * It is an error to give the results from get0 on d
+     * as input parameters.
+     */
+    if (p == d->p || q == d->q || g == d->g)
+        return 0;
+
+    if (p != NULL) {
+        BN_free(d->p);
+        d->p = p;
+    }
+    if (q != NULL) {
+        BN_free(d->q);
+        d->q = q;
+    }
+    if (g != NULL) {
+        BN_free(d->g);
+        d->g = g;
+    }
+
+    return 1;
+}
+
+void DSA_get0_key(const DSA *d, BIGNUM **pub_key, BIGNUM **priv_key)
+{
+    if (pub_key != NULL)
+        *pub_key = d->pub_key;
+    if (priv_key != NULL)
+        *priv_key = d->priv_key;
+}
+
+int DSA_set0_key(DSA *d, BIGNUM *pub_key, BIGNUM *priv_key)
+{
+    /* If the pub_key in d is NULL, the corresponding input
+     * parameters MUST be non-NULL.  The priv_key field may
+     * be left NULL.
+     *
+     * It is an error to give the results from get0 on d
+     * as input parameters.
+     */
+    if (d->pub_key == pub_key
+        || (d->priv_key != NULL && priv_key == d->priv_key))
+        return 0;
+
+    if (pub_key != NULL) {
+        BN_free(d->pub_key);
+        d->pub_key = pub_key;
+    }
+    if (priv_key != NULL) {
+        BN_free(d->priv_key);
+        d->priv_key = priv_key;
+    }
+
+    return 1;
+}
+
+void DSA_clear_flags(DSA *d, int flags)
+{
+    d->flags &= ~flags;
+}
+
+int DSA_test_flags(const DSA *d, int flags)
+{
+    return d->flags & flags;
+}
+
+void DSA_set_flags(DSA *d, int flags)
+{
+    d->flags |= flags;
+}
+
+ENGINE *DSA_get0_engine(DSA *d)
+{
+    return d->engine;
+}

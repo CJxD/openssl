@@ -1,4 +1,3 @@
-/* crypto/dsa/dsa_sign.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,7 +58,7 @@
 /* Original version from Steven Schoch <schoch@sheba.arc.nasa.gov> */
 
 #include "internal/cryptlib.h"
-#include <openssl/dsa.h>
+#include "dsa_locl.h"
 #include <openssl/rand.h>
 #include <openssl/bn.h>
 

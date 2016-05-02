@@ -1,4 +1,3 @@
-/* crypto/ec/ectest.c */
 /*
  * Originally written by Bodo Moeller for the OpenSSL project.
  */
@@ -120,6 +119,8 @@ static void group_order_tests(EC_GROUP *group)
     BIGNUM *n1, *n2, *order;
     EC_POINT *P = EC_POINT_new(group);
     EC_POINT *Q = EC_POINT_new(group);
+    EC_POINT *R = EC_POINT_new(group);
+    EC_POINT *S = EC_POINT_new(group);
     BN_CTX *ctx = BN_CTX_new();
     int i;
 
@@ -199,6 +200,17 @@ static void group_order_tests(EC_GROUP *group)
         /* Exercise EC_POINTs_mul, including corner cases. */
         if (EC_POINT_is_at_infinity(group, P))
             ABORT;
+
+        scalars[0] = scalars[1] = BN_value_one();
+        points[0]  = points[1]  = P;
+
+        if (!EC_POINTs_mul(group, R, NULL, 2, points, scalars, ctx))
+            ABORT;
+        if (!EC_POINT_dbl(group, S, points[0], ctx))
+            ABORT;
+        if (0 != EC_POINT_cmp(group, R, S, ctx))
+            ABORT;
+
         scalars[0] = n1;
         points[0] = Q;          /* => infinity */
         scalars[1] = n2;
@@ -220,6 +232,8 @@ static void group_order_tests(EC_GROUP *group)
 
     EC_POINT_free(P);
     EC_POINT_free(Q);
+    EC_POINT_free(R);
+    EC_POINT_free(S);
     BN_free(n1);
     BN_free(n2);
     BN_free(order);
@@ -1398,6 +1412,26 @@ static void internal_curve_test(void)
         fprintf(stdout, " failed\n\n");
         ABORT;
     }
+
+    /* Test all built-in curves and let the library choose the EC_METHOD */
+    for (n = 0; n < crv_len; n++) {
+        EC_GROUP *group = NULL;
+        int nid = curves[n].nid;
+        /*
+         * Skip for X25519 because low level operations such as EC_POINT_mul()
+         * are not supported for this curve
+         */
+        if (nid == NID_X25519)
+            continue;
+        fprintf(stdout, "%s:\n", OBJ_nid2sn(nid));
+        fflush(stdout);
+        if ((group = EC_GROUP_new_by_curve_name(nid)) == NULL) {
+            ABORT;
+        }
+        group_order_tests(group);
+        EC_GROUP_free(group);
+    }
+
     OPENSSL_free(curves);
     return;
 }
@@ -1412,7 +1446,7 @@ struct nistp_test_params {
     int degree;
     /*
      * Qx, Qy and D are taken from
-     * http://csrcdocut.gov/groups/ST/toolkit/documents/Examples/ECDSA_Prime.pdf
+     * http://csrc.nist.gov/groups/ST/toolkit/documents/Examples/ECDSA_Prime.pdf
      * Otherwise, values are standard curve parameters from FIPS 180-3
      */
     const char *p, *a, *b, *Qx, *Qy, *Gx, *Gy, *order, *d;
@@ -1579,8 +1613,17 @@ static void nistp_single_test(const struct nistp_test_params *test)
     if (0 != EC_POINT_cmp(NISTP, Q, Q_CHECK, ctx))
         ABORT;
 
+    /*
+     * We have not performed precomputation so have_precompute mult should be
+     * false
+     */
+    if (EC_GROUP_have_precompute_mult(NISTP))
+        ABORT;
+
     /* now repeat all tests with precomputation */
     if (!EC_GROUP_precompute_mult(NISTP, ctx))
+        ABORT;
+    if (!EC_GROUP_have_precompute_mult(NISTP))
         ABORT;
 
     /* fixed point multiplication */
@@ -1637,18 +1680,12 @@ static const char rnd_seed[] =
 
 int main(int argc, char *argv[])
 {
+    char *p;
 
-    /* enable memory leak checking unless explicitly disabled */
-    if (!((getenv("OPENSSL_DEBUG_MEMORY") != NULL)
-          && (0 == strcmp(getenv("OPENSSL_DEBUG_MEMORY"), "off")))) {
-        CRYPTO_malloc_debug_init();
-        CRYPTO_set_mem_debug_options(V_CRYPTO_MDEBUG_ALL);
-    } else {
-        /* OPENSSL_DEBUG_MEMORY=off */
-        CRYPTO_set_mem_debug_functions(0, 0, 0, 0, 0);
-    }
+    p = getenv("OPENSSL_DEBUG_MEMORY");
+    if (p != NULL && strcmp(p, "on") == 0)
+        CRYPTO_set_mem_debug(1);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-    ERR_load_crypto_strings();
 
     RAND_seed(rnd_seed, sizeof rnd_seed); /* or BN_generate_prime may fail */
 
@@ -1663,13 +1700,10 @@ int main(int argc, char *argv[])
     /* test the internal curves */
     internal_curve_test();
 
-# ifndef OPENSSL_NO_ENGINE
-    ENGINE_cleanup();
-# endif
-    CRYPTO_cleanup_all_ex_data();
-    ERR_free_strings();
-    ERR_remove_thread_state(NULL);
-    CRYPTO_mem_leaks_fp(stderr);
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+    if (CRYPTO_mem_leaks_fp(stderr) <= 0)
+        return 1;
+#endif
 
     return 0;
 }

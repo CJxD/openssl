@@ -1,4 +1,3 @@
-/* crypto/sha/sha1test.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -68,10 +67,9 @@
 # include <openssl/ebcdic.h>
 #endif
 
-static char *test[] = {
-    "abc",
-    "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
-    NULL,
+static char test[][80] = {
+    { "abc" },
+    { "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" }
 };
 
 static char *ret[] = {
@@ -84,44 +82,39 @@ static char *bigret = "34aa973cd4c4daa4f61eeb2bdbad27316534016f";
 static char *pt(unsigned char *md);
 int main(int argc, char *argv[])
 {
-    int i, err = 0;
-    char **P, **R;
+    unsigned int i;
+    int err = 0;
+    char **R;
     static unsigned char buf[1000];
     char *p, *r;
-    EVP_MD_CTX c;
+    EVP_MD_CTX *c;
     unsigned char md[SHA_DIGEST_LENGTH];
 
-#ifdef CHARSET_EBCDIC
-    ebcdic2ascii(test[0], test[0], strlen(test[0]));
-    ebcdic2ascii(test[1], test[1], strlen(test[1]));
-#endif
-
-    EVP_MD_CTX_init(&c);
-    P = test;
+    c = EVP_MD_CTX_new();
     R = ret;
-    i = 1;
-    while (*P != NULL) {
-        EVP_Digest(*P, strlen((char *)*P), md, NULL, EVP_sha1(), NULL);
+    for (i = 0; i < OSSL_NELEM(test); i++) {
+# ifdef CHARSET_EBCDIC
+        ebcdic2ascii(test[i], test[i], strlen(test[i]));
+# endif
+        EVP_Digest(test[i], strlen(test[i]), md, NULL, EVP_sha1(), NULL);
         p = pt(md);
         if (strcmp(p, (char *)*R) != 0) {
-            printf("error calculating SHA1 on '%s'\n", *P);
+            printf("error calculating SHA1 on '%s'\n", test[i]);
             printf("got %s instead of %s\n", p, *R);
             err++;
         } else
-            printf("test %d ok\n", i);
-        i++;
+            printf("test %d ok\n", i + 1);
         R++;
-        P++;
     }
 
     memset(buf, 'a', 1000);
 #ifdef CHARSET_EBCDIC
     ebcdic2ascii(buf, buf, 1000);
 #endif                         /* CHARSET_EBCDIC */
-    EVP_DigestInit_ex(&c, EVP_sha1(), NULL);
+    EVP_DigestInit_ex(c, EVP_sha1(), NULL);
     for (i = 0; i < 1000; i++)
-        EVP_DigestUpdate(&c, buf, 1000);
-    EVP_DigestFinal_ex(&c, md, NULL);
+        EVP_DigestUpdate(c, buf, 1000);
+    EVP_DigestFinal_ex(c, md, NULL);
     p = pt(md);
 
     r = bigret;
@@ -132,12 +125,8 @@ int main(int argc, char *argv[])
     } else
         printf("test 3 ok\n");
 
-#ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-#endif
+    EVP_MD_CTX_free(c);
     EXIT(err);
-    EVP_MD_CTX_cleanup(&c);
     return (0);
 }
 

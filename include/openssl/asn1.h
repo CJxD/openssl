@@ -1,4 +1,3 @@
-/* crypto/asn1/asn1.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -61,6 +60,7 @@
 
 # include <time.h>
 # include <openssl/e_os2.h>
+# include <openssl/opensslconf.h>
 # include <openssl/bio.h>
 # include <openssl/stack.h>
 # include <openssl/safestack.h>
@@ -68,7 +68,7 @@
 # include <openssl/symhacks.h>
 
 # include <openssl/ossl_typ.h>
-# ifdef OPENSSL_USE_DEPRECATED
+# if OPENSSL_API_COMPAT < 0x10100000L
 #  include <openssl/bn.h>
 # endif
 
@@ -157,7 +157,7 @@ extern "C" {
 # define SMIME_CRLFEOL           0x800
 # define SMIME_STREAM            0x1000
     struct X509_algor_st;
-DECLARE_STACK_OF(X509_ALGOR)
+DEFINE_STACK_OF(X509_ALGOR)
 
 # define ASN1_STRING_FLAG_BITS_LEFT 0x08/* Set if 0x07 has bits left value */
 /*
@@ -179,6 +179,8 @@ DECLARE_STACK_OF(X509_ALGOR)
  * type.
  */
 # define ASN1_STRING_FLAG_MSTRING 0x040
+/* String is embedded and only content should be freed */
+# define ASN1_STRING_FLAG_EMBED 0x080
 /* This is the base type that holds just about everything :-) */
 struct asn1_string_st {
     int length;
@@ -228,7 +230,7 @@ typedef struct asn1_string_table_st {
     unsigned long flags;
 } ASN1_STRING_TABLE;
 
-DECLARE_STACK_OF(ASN1_STRING_TABLE)
+DEFINE_STACK_OF(ASN1_STRING_TABLE)
 
 /* size limits: this stuff is taken straight from RFC2459 */
 
@@ -467,9 +469,9 @@ typedef const ASN1_ITEM *ASN1_ITEM_EXP (void);
                                 ASN1_STRFLGS_DUMP_UNKNOWN | \
                                 ASN1_STRFLGS_DUMP_DER)
 
-DECLARE_STACK_OF(ASN1_INTEGER)
+DEFINE_STACK_OF(ASN1_INTEGER)
 
-DECLARE_STACK_OF(ASN1_GENERALSTRING)
+DEFINE_STACK_OF(ASN1_GENERALSTRING)
 
 typedef struct asn1_type_st {
     int type;
@@ -502,7 +504,7 @@ typedef struct asn1_type_st {
     } value;
 } ASN1_TYPE;
 
-DECLARE_STACK_OF(ASN1_TYPE)
+DEFINE_STACK_OF(ASN1_TYPE)
 
 typedef STACK_OF(ASN1_TYPE) ASN1_SEQUENCE_ANY;
 
@@ -563,7 +565,7 @@ ASN1_OBJECT *d2i_ASN1_OBJECT(ASN1_OBJECT **a, const unsigned char **pp,
 
 DECLARE_ASN1_ITEM(ASN1_OBJECT)
 
-DECLARE_STACK_OF(ASN1_OBJECT)
+DEFINE_STACK_OF(ASN1_OBJECT)
 
 ASN1_STRING *ASN1_STRING_new(void);
 void ASN1_STRING_free(ASN1_STRING *a);
@@ -783,6 +785,7 @@ int ASN1_GENERALIZEDTIME_print(BIO *fp, const ASN1_GENERALIZEDTIME *a);
 int ASN1_TIME_print(BIO *fp, const ASN1_TIME *a);
 int ASN1_STRING_print(BIO *bp, const ASN1_STRING *v);
 int ASN1_STRING_print_ex(BIO *out, ASN1_STRING *str, unsigned long flags);
+int ASN1_buf_print(BIO *bp, unsigned char *buf, size_t buflen, int off);
 int ASN1_bn_print(BIO *bp, const char *number, const BIGNUM *num,
                   unsigned char *buf, int off);
 int ASN1_parse(BIO *bp, const unsigned char *pp, long len, int indent);
@@ -884,7 +887,7 @@ unsigned long ASN1_SCTX_get_flags(ASN1_SCTX *p);
 void ASN1_SCTX_set_app_data(ASN1_SCTX *p, void *data);
 void *ASN1_SCTX_get_app_data(ASN1_SCTX *p);
 
-BIO_METHOD *BIO_f_asn1(void);
+const BIO_METHOD *BIO_f_asn1(void);
 
 BIO *BIO_new_NDEF(BIO *out, ASN1_VALUE *val, const ASN1_ITEM *it);
 

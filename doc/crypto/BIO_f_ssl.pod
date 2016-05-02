@@ -12,7 +12,7 @@ BIO_ssl_shutdown - SSL BIO
  #include <openssl/bio.h>
  #include <openssl/ssl.h>
 
- BIO_METHOD *BIO_f_ssl(void);
+ const BIO_METHOD *BIO_f_ssl(void);
 
  #define BIO_set_ssl(b,ssl,c)	BIO_ctrl(b,BIO_C_SET_SSL,c,(char *)ssl)
  #define BIO_get_ssl(b,sslp)	BIO_ctrl(b,BIO_C_GET_SSL,0,(char *)sslp)
@@ -110,7 +110,7 @@ circumstances. Specifically this will happen if a session
 renegotiation takes place during a BIO_read() operation, one
 case where this happens is when step up occurs.
 
-In OpenSSL 0.9.6 and later the SSL flag SSL_AUTO_RETRY can be
+The SSL flag SSL_AUTO_RETRY can be
 set to disable this behaviour. That is when this flag is set
 an SSL BIO using a blocking transport will never request a
 retry.
@@ -140,10 +140,6 @@ unencrypted example in L<BIO_s_connect(3)>.
  SSL_CTX *ctx;
  SSL *ssl;
 
- ERR_load_crypto_strings();
- ERR_load_SSL_strings();
- OpenSSL_add_all_algorithms();
-
  /* We would seed the PRNG here if the platform didn't
   * do it automatically
   */
@@ -169,7 +165,8 @@ unencrypted example in L<BIO_s_connect(3)>.
 
  /* We might want to do other things with ssl here */
 
- BIO_set_conn_hostname(sbio, "localhost:https");
+ /* An empty host part means the loopback address */
+ BIO_set_conn_hostname(sbio, ":https");
 
  out = BIO_new_fp(stdout, BIO_NOCLOSE);
  if(BIO_do_connect(sbio) <= 0) {
@@ -205,10 +202,6 @@ a client and also echoes the request to standard output.
  char tmpbuf[1024];
  SSL_CTX *ctx;
  SSL *ssl;
-
- ERR_load_crypto_strings();
- ERR_load_SSL_strings();
- OpenSSL_add_all_algorithms();
 
  /* Might seed PRNG here */
 

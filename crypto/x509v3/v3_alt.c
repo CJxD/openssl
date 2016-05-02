@@ -1,4 +1,3 @@
-/* v3_alt.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -578,11 +577,9 @@ static int do_othername(GENERAL_NAME *gen, char *value, X509V3_CTX *ctx)
     if ((gen->d.otherName->value = ASN1_generate_v3(p + 1, ctx)) == NULL)
         return 0;
     objlen = p - value;
-    objtmp = OPENSSL_malloc(objlen + 1);
+    objtmp = OPENSSL_strndup(value, objlen);
     if (objtmp == NULL)
         return 0;
-    strncpy(objtmp, value, objlen);
-    objtmp[objlen] = 0;
     gen->d.otherName->type_id = OBJ_txt2obj(objtmp, 0);
     OPENSSL_free(objtmp);
     if (!gen->d.otherName->type_id)

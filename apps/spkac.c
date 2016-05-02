@@ -112,6 +112,7 @@ int spkac_main(int argc, char **argv)
         switch (o) {
         case OPT_EOF:
         case OPT_ERR:
+ opthelp:
             BIO_printf(bio_err, "%s: Use -help for summary.\n", prog);
             goto end;
         case OPT_HELP:
@@ -154,7 +155,8 @@ int spkac_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
+    if (argc != 0)
+        goto opthelp;
 
     if (!app_passwd(passinarg, NULL, &passin, NULL)) {
         BIO_printf(bio_err, "Error getting password\n");
@@ -186,12 +188,10 @@ int spkac_main(int argc, char **argv)
 
     if ((conf = app_load_config(infile)) == NULL)
         goto end;
-    if (!app_load_modules(conf))
-        goto end;
 
     spkstr = NCONF_get_string(conf, spksect, spkac);
 
-    if (!spkstr) {
+    if (spkstr == NULL) {
         BIO_printf(bio_err, "Can't find SPKAC called \"%s\"\n", spkac);
         ERR_print_errors(bio_err);
         goto end;

@@ -1,4 +1,3 @@
-/* crypto/ts/ts_verify_ctx.c */
 /*
  * Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL project
  * 2003.
@@ -66,7 +65,7 @@ TS_VERIFY_CTX *TS_VERIFY_CTX_new(void)
 {
     TS_VERIFY_CTX *ctx = OPENSSL_zalloc(sizeof(*ctx));
 
-    if (!ctx)
+    if (ctx == NULL)
         TSerr(TS_F_TS_VERIFY_CTX_NEW, ERR_R_MALLOC_FAILURE);
     return ctx;
 }

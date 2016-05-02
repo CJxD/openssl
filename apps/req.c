@@ -89,8 +89,8 @@
 #define STRING_MASK     "string_mask"
 #define UTF8_IN         "utf8"
 
-#define DEFAULT_KEY_LENGTH      512
-#define MIN_KEY_LENGTH          384
+#define DEFAULT_KEY_LENGTH      2048
+#define MIN_KEY_LENGTH          512
 
 static int make_REQ(X509_REQ *req, EVP_PKEY *pkey, char *dn, int mutlirdn,
                     int attribs, unsigned long chtype);
@@ -136,19 +136,19 @@ OPTIONS req_options[] = {
     {"outform", OPT_OUTFORM, 'F', "Output format - DER or PEM"},
     {"in", OPT_IN, '<', "Input file"},
     {"out", OPT_OUT, '>', "Output file"},
-    {"key", OPT_KEY, '<', "Use the private key contained in file"},
-    {"keyform", OPT_KEYFORM, 'F', "Key file format"},
+    {"key", OPT_KEY, 's', "Private key to use"},
+    {"keyform", OPT_KEYFORM, 'f', "Key file format"},
     {"pubkey", OPT_PUBKEY, '-', "Output public key"},
     {"new", OPT_NEW, '-', "New request"},
     {"config", OPT_CONFIG, '<', "Request template file"},
     {"keyout", OPT_KEYOUT, '>', "File to send the key to"},
     {"passin", OPT_PASSIN, 's', "Private key password source"},
-    {"passout", OPT_PASSOUT, 's'},
+    {"passout", OPT_PASSOUT, 's', "Output file pass phrase source"},
     {"rand", OPT_RAND, 's',
      "Load the file(s) into the random number generator"},
     {"newkey", OPT_NEWKEY, 's', "Specify as type:bits"},
-    {"pkeyopt", OPT_PKEYOPT, 's'},
-    {"sigopt", OPT_SIGOPT, 's'},
+    {"pkeyopt", OPT_PKEYOPT, 's', "Public key options as opt:value"},
+    {"sigopt", OPT_SIGOPT, 's', "Signature parameter in n:v form"},
     {"batch", OPT_BATCH, '-',
      "Do not ask anything during request generation"},
     {"newhdr", OPT_NEWHDR, '-', "Output \"NEW\" in the header lines"},
@@ -156,7 +156,7 @@ OPTIONS req_options[] = {
     {"verify", OPT_VERIFY, '-', "Verify signature on REQ"},
     {"nodes", OPT_NODES, '-', "Don't encrypt the output key"},
     {"noout", OPT_NOOUT, '-', "Do not output REQ"},
-    {"verbose", OPT_VERBOSE, '-'},
+    {"verbose", OPT_VERBOSE, '-', "Verbose output"},
     {"utf8", OPT_UTF8, '-', "Input characters are UTF8 (default ASCII)"},
     {"nameopt", OPT_NAMEOPT, 's', "Various certificate name options"},
     {"reqopt", OPT_REQOPT, 's', "Various request text options"},
@@ -169,7 +169,7 @@ OPTIONS req_options[] = {
     {"multivalue-rdn", OPT_MULTIVALUE_RDN, '-',
      "Enable support for multivalued RDNs"},
     {"days", OPT_DAYS, 'p', "Number of days cert is valid for"},
-    {"set-serial", OPT_SET_SERIAL, 'p', "Serial number to use"},
+    {"set_serial", OPT_SET_SERIAL, 'p', "Serial number to use"},
     {"extensions", OPT_EXTENSIONS, 's',
      "Cert extension section (override value in config file)"},
     {"reqexts", OPT_REQEXTS, 's',
@@ -177,7 +177,8 @@ OPTIONS req_options[] = {
     {"", OPT_MD, '-', "Any supported digest"},
 #ifndef OPENSSL_NO_ENGINE
     {"engine", OPT_ENGINE, 's', "Use engine, possibly a hardware device"},
-    {"keygen_engine", OPT_KEYGEN_ENGINE, 's'},
+    {"keygen_engine", OPT_KEYGEN_ENGINE, 's',
+     "Specify engine to be used for key generation operations"},
 #endif
     {NULL}
 };
@@ -197,7 +198,9 @@ int req_main(int argc, char **argv)
     char *extensions = NULL, *infile = NULL;
     char *outfile = NULL, *keyfile = NULL, *inrand = NULL;
     char *keyalgstr = NULL, *p, *prog, *passargin = NULL, *passargout = NULL;
-    char *passin = NULL, *passout = NULL, *req_exts = NULL, *subj = NULL;
+    char *passin = NULL, *passout = NULL;
+    char *nofree_passin = NULL, *nofree_passout = NULL;
+    char *req_exts = NULL, *subj = NULL;
     char *template = default_config_file, *keyout = NULL;
     const char *keyalg = NULL;
     OPTION_CHOICE o;
@@ -235,7 +238,7 @@ int req_main(int argc, char **argv)
                 goto opthelp;
             break;
         case OPT_ENGINE:
-            (void)setup_engine(opt_arg(), 0);
+            e = setup_engine(opt_arg(), 0);
             break;
         case OPT_KEYGEN_ENGINE:
 #ifndef OPENSSL_NO_ENGINE
@@ -259,7 +262,7 @@ int req_main(int argc, char **argv)
             template = opt_arg();
             break;
         case OPT_KEYFORM:
-            if (!opt_format(opt_arg(), OPT_FMT_PEMDER, &keyform))
+            if (!opt_format(opt_arg(), OPT_FMT_ANY, &keyform))
                 goto opthelp;
             break;
         case OPT_IN:
@@ -366,11 +369,13 @@ int req_main(int argc, char **argv)
         }
     }
     argc = opt_num_rest();
-    argv = opt_rest();
+    if (argc != 0)
+        goto opthelp;
 
     if (!nmflag_set)
         nmflag = XN_FLAG_ONELINE;
 
+    /* TODO: simplify this as pkey is still always NULL here */ 
     private = newreq && (pkey == NULL) ? 1 : 0;
 
     if (!app_passwd(passargin, passargout, &passin, &passout)) {
@@ -434,15 +439,17 @@ int req_main(int argc, char **argv)
         }
     }
 
-    if (!passin) {
-        passin = NCONF_get_string(req_conf, SECTION, "input_password");
-        if (!passin)
+    if (passin == NULL) {
+        passin = nofree_passin =
+            NCONF_get_string(req_conf, SECTION, "input_password");
+        if (passin == NULL)
             ERR_clear_error();
     }
 
-    if (!passout) {
-        passout = NCONF_get_string(req_conf, SECTION, "output_password");
-        if (!passout)
+    if (passout == NULL) {
+        passout = nofree_passout =
+            NCONF_get_string(req_conf, SECTION, "output_password");
+        if (passout == NULL)
             ERR_clear_error();
     }
 
@@ -660,10 +667,9 @@ int req_main(int argc, char **argv)
             if (!X509_set_subject_name
                 (x509ss, X509_REQ_get_subject_name(req)))
                 goto end;
-            tmppkey = X509_REQ_get_pubkey(req);
+            tmppkey = X509_REQ_get0_pubkey(req);
             if (!tmppkey || !X509_set_pubkey(x509ss, tmppkey))
                 goto end;
-            EVP_PKEY_free(tmppkey);
 
             /* Set up V3 context struct */
 
@@ -733,20 +739,15 @@ int req_main(int argc, char **argv)
     }
 
     if (verify && !x509) {
-        int tmp = 0;
+        EVP_PKEY *tpubkey = pkey;
 
-        if (pkey == NULL) {
-            pkey = X509_REQ_get_pubkey(req);
-            tmp = 1;
-            if (pkey == NULL)
+        if (tpubkey == NULL) {
+            tpubkey = X509_REQ_get0_pubkey(req);
+            if (tpubkey == NULL)
                 goto end;
         }
 
-        i = X509_REQ_verify(req, pkey);
-        if (tmp) {
-            EVP_PKEY_free(pkey);
-            pkey = NULL;
-        }
+        i = X509_REQ_verify(req, tpubkey);
 
         if (i < 0) {
             goto end;
@@ -810,9 +811,11 @@ int req_main(int argc, char **argv)
         }
         fprintf(stdout, "Modulus=");
 #ifndef OPENSSL_NO_RSA
-        if (EVP_PKEY_base_id(tpubkey) == EVP_PKEY_RSA)
-            BN_print(out, tpubkey->pkey.rsa->n);
-        else
+        if (EVP_PKEY_base_id(tpubkey) == EVP_PKEY_RSA) {
+            BIGNUM *n;
+            RSA_get0_key(EVP_PKEY_get0_RSA(tpubkey), &n, NULL, NULL);
+            BN_print(out, n);
+        } else
 #endif
             fprintf(stdout, "Wrong Algorithm type");
         EVP_PKEY_free(tpubkey);
@@ -860,9 +863,10 @@ int req_main(int argc, char **argv)
     X509_REQ_free(req);
     X509_free(x509ss);
     ASN1_INTEGER_free(serial);
-    OPENSSL_free(passin);
-    OPENSSL_free(passout);
-    OBJ_cleanup();
+    if (passin != nofree_passin)
+        OPENSSL_free(passin);
+    if (passout != nofree_passout)
+        OPENSSL_free(passout);
     return (ret);
 }
 
@@ -1118,7 +1122,7 @@ static int auto_info(X509_REQ *req, STACK_OF(CONF_VALUE) *dn_sk,
                      STACK_OF(CONF_VALUE) *attr_sk, int attribs,
                      unsigned long chtype)
 {
-    int i;
+    int i, spec_char, plus_char;
     char *p, *q;
     char *type;
     CONF_VALUE *v;
@@ -1134,24 +1138,26 @@ static int auto_info(X509_REQ *req, STACK_OF(CONF_VALUE) *dn_sk,
         /*
          * Skip past any leading X. X: X, etc to allow for multiple instances
          */
-        for (p = v->name; *p; p++)
+        for (p = v->name; *p; p++) {
 #ifndef CHARSET_EBCDIC
-            if ((*p == ':') || (*p == ',') || (*p == '.')) {
+            spec_char = ((*p == ':') || (*p == ',') || (*p == '.'));
 #else
-            if ((*p == os_toascii[':']) || (*p == os_toascii[','])
-                || (*p == os_toascii['.'])) {
+            spec_char = ((*p == os_toascii[':']) || (*p == os_toascii[','])
+                    || (*p == os_toascii['.']));
 #endif
+            if (spec_char) {
                 p++;
                 if (*p)
                     type = p;
                 break;
             }
+        }
 #ifndef CHARSET_EBCDIC
-        if (*p == '+')
+        plus_char = (*p == '+');
 #else
-        if (*p == os_toascii['+'])
+        plus_char = (*p == os_toascii['+']);
 #endif
-        {
+        if (plus_char) {
             p++;
             mval = -1;
         } else
@@ -1189,8 +1195,8 @@ static int add_DN_object(X509_NAME *n, char *text, const char *def,
         BIO_printf(bio_err, "%s [%s]:", text, def);
     (void)BIO_flush(bio_err);
     if (value != NULL) {
-        BUF_strlcpy(buf, value, sizeof buf);
-        BUF_strlcat(buf, "\n", sizeof buf);
+        OPENSSL_strlcpy(buf, value, sizeof buf);
+        OPENSSL_strlcat(buf, "\n", sizeof buf);
         BIO_printf(bio_err, "%s\n", value);
     } else {
         buf[0] = '\0';
@@ -1208,8 +1214,8 @@ static int add_DN_object(X509_NAME *n, char *text, const char *def,
     else if (buf[0] == '\n') {
         if ((def == NULL) || (def[0] == '\0'))
             return (1);
-        BUF_strlcpy(buf, def, sizeof buf);
-        BUF_strlcat(buf, "\n", sizeof buf);
+        OPENSSL_strlcpy(buf, def, sizeof buf);
+        OPENSSL_strlcat(buf, "\n", sizeof buf);
     } else if ((buf[0] == '.') && (buf[1] == '\n'))
         return (1);
 
@@ -1248,8 +1254,8 @@ static int add_attribute_object(X509_REQ *req, char *text, const char *def,
         BIO_printf(bio_err, "%s [%s]:", text, def);
     (void)BIO_flush(bio_err);
     if (value != NULL) {
-        BUF_strlcpy(buf, value, sizeof buf);
-        BUF_strlcat(buf, "\n", sizeof buf);
+        OPENSSL_strlcpy(buf, value, sizeof buf);
+        OPENSSL_strlcat(buf, "\n", sizeof buf);
         BIO_printf(bio_err, "%s\n", value);
     } else {
         buf[0] = '\0';
@@ -1267,8 +1273,8 @@ static int add_attribute_object(X509_REQ *req, char *text, const char *def,
     else if (buf[0] == '\n') {
         if ((def == NULL) || (def[0] == '\0'))
             return (1);
-        BUF_strlcpy(buf, def, sizeof buf);
-        BUF_strlcat(buf, "\n", sizeof buf);
+        OPENSSL_strlcpy(buf, def, sizeof buf);
+        OPENSSL_strlcat(buf, "\n", sizeof buf);
     } else if ((buf[0] == '.') && (buf[1] == '\n'))
         return (1);
 
@@ -1372,8 +1378,7 @@ static EVP_PKEY_CTX *set_keygen_ctx(const char *gstr,
 
         EVP_PKEY_asn1_get0_info(NULL, pkey_type, NULL, NULL, NULL, ameth);
 #ifndef OPENSSL_NO_ENGINE
-        if (tmpeng)
-            ENGINE_finish(tmpeng);
+        ENGINE_finish(tmpeng);
 #endif
         if (*pkey_type == EVP_PKEY_RSA) {
             if (p) {
@@ -1428,10 +1433,9 @@ static EVP_PKEY_CTX *set_keygen_ctx(const char *gstr,
             return NULL;
         }
         EVP_PKEY_asn1_get0_info(NULL, NULL, NULL, NULL, &anam, ameth);
-        *palgnam = BUF_strdup(anam);
+        *palgnam = OPENSSL_strdup(anam);
 #ifndef OPENSSL_NO_ENGINE
-        if (tmpeng)
-            ENGINE_finish(tmpeng);
+        ENGINE_finish(tmpeng);
 #endif
     }
 
@@ -1442,7 +1446,7 @@ static EVP_PKEY_CTX *set_keygen_ctx(const char *gstr,
     } else
         gctx = EVP_PKEY_CTX_new_id(*pkey_type, keygen_engine);
 
-    if (!gctx) {
+    if (gctx == NULL) {
         BIO_puts(bio_err, "Error allocating keygen context\n");
         ERR_print_errors(bio_err);
         return NULL;
@@ -1451,6 +1455,7 @@ static EVP_PKEY_CTX *set_keygen_ctx(const char *gstr,
     if (EVP_PKEY_keygen_init(gctx) <= 0) {
         BIO_puts(bio_err, "Error initializing keygen context\n");
         ERR_print_errors(bio_err);
+        EVP_PKEY_CTX_free(gctx);
         return NULL;
     }
 #ifndef OPENSSL_NO_RSA
@@ -1492,7 +1497,8 @@ static int do_sign_init(EVP_MD_CTX *ctx, EVP_PKEY *pkey,
     EVP_PKEY_CTX *pkctx = NULL;
     int i;
 
-    EVP_MD_CTX_init(ctx);
+    if (ctx == NULL)
+        return 0;
     if (!EVP_DigestSignInit(ctx, &pkctx, md, NULL, pkey))
         return 0;
     for (i = 0; i < sk_OPENSSL_STRING_num(sigopts); i++) {
@@ -1510,13 +1516,12 @@ int do_X509_sign(X509 *x, EVP_PKEY *pkey, const EVP_MD *md,
                  STACK_OF(OPENSSL_STRING) *sigopts)
 {
     int rv;
-    EVP_MD_CTX mctx;
+    EVP_MD_CTX *mctx = EVP_MD_CTX_new();
 
-    EVP_MD_CTX_init(&mctx);
-    rv = do_sign_init(&mctx, pkey, md, sigopts);
+    rv = do_sign_init(mctx, pkey, md, sigopts);
     if (rv > 0)
-        rv = X509_sign_ctx(x, &mctx);
-    EVP_MD_CTX_cleanup(&mctx);
+        rv = X509_sign_ctx(x, mctx);
+    EVP_MD_CTX_free(mctx);
     return rv > 0 ? 1 : 0;
 }
 
@@ -1524,13 +1529,11 @@ int do_X509_REQ_sign(X509_REQ *x, EVP_PKEY *pkey, const EVP_MD *md,
                      STACK_OF(OPENSSL_STRING) *sigopts)
 {
     int rv;
-    EVP_MD_CTX mctx;
-
-    EVP_MD_CTX_init(&mctx);
-    rv = do_sign_init(&mctx, pkey, md, sigopts);
+    EVP_MD_CTX *mctx = EVP_MD_CTX_new();
+    rv = do_sign_init(mctx, pkey, md, sigopts);
     if (rv > 0)
-        rv = X509_REQ_sign_ctx(x, &mctx);
-    EVP_MD_CTX_cleanup(&mctx);
+        rv = X509_REQ_sign_ctx(x, mctx);
+    EVP_MD_CTX_free(mctx);
     return rv > 0 ? 1 : 0;
 }
 
@@ -1538,12 +1541,10 @@ int do_X509_CRL_sign(X509_CRL *x, EVP_PKEY *pkey, const EVP_MD *md,
                      STACK_OF(OPENSSL_STRING) *sigopts)
 {
     int rv;
-    EVP_MD_CTX mctx;
-
-    EVP_MD_CTX_init(&mctx);
-    rv = do_sign_init(&mctx, pkey, md, sigopts);
+    EVP_MD_CTX *mctx = EVP_MD_CTX_new();
+    rv = do_sign_init(mctx, pkey, md, sigopts);
     if (rv > 0)
-        rv = X509_CRL_sign_ctx(x, &mctx);
-    EVP_MD_CTX_cleanup(&mctx);
+        rv = X509_CRL_sign_ctx(x, mctx);
+    EVP_MD_CTX_free(mctx);
     return rv > 0 ? 1 : 0;
 }

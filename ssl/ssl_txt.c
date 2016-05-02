@@ -1,4 +1,3 @@
-/* ssl/ssl_txt.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -112,22 +111,7 @@ int SSL_SESSION_print(BIO *bp, const SSL_SESSION *x)
         goto err;
     if (BIO_puts(bp, "SSL-Session:\n") <= 0)
         goto err;
-    if (x->ssl_version == SSL3_VERSION)
-        s = "SSLv3";
-    else if (x->ssl_version == TLS1_2_VERSION)
-        s = "TLSv1.2";
-    else if (x->ssl_version == TLS1_1_VERSION)
-        s = "TLSv1.1";
-    else if (x->ssl_version == TLS1_VERSION)
-        s = "TLSv1";
-    else if (x->ssl_version == DTLS1_VERSION)
-        s = "DTLSv1";
-    else if (x->ssl_version == DTLS1_2_VERSION)
-        s = "DTLSv1.2";
-    else if (x->ssl_version == DTLS1_BAD_VER)
-        s = "DTLSv1-bad";
-    else
-        s = "unknown";
+    s = ssl_protocol_to_string(x->ssl_version);
     if (BIO_printf(bp, "    Protocol  : %s\n", s) <= 0)
         goto err;
 
@@ -254,7 +238,7 @@ int SSL_SESSION_print_keylog(BIO *bp, const SSL_SESSION *x)
 
     /*
      * the RSA prefix is required by the format's definition although there's
-     * nothing RSA-specifc in the output, therefore, we don't have to check if
+     * nothing RSA-specific in the output, therefore, we don't have to check if
      * the cipher suite is based on RSA
      */
     if (BIO_puts(bp, "RSA ") <= 0)

@@ -1,4 +1,3 @@
-/* crypto/ts/ts_lib.c */
 /*
  * Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL project
  * 2002.
@@ -73,7 +72,7 @@ int TS_ASN1_INTEGER_print_bio(BIO *bio, const ASN1_INTEGER *num)
     char *hex;
 
     num_bn = BN_new();
-    if (!num_bn)
+    if (num_bn == NULL)
         return -1;
     ASN1_INTEGER_to_BN(num, num_bn);
     if ((hex = BN_bn2hex(num_bn))) {

@@ -48,8 +48,8 @@
 #					<ard.biesheuvel@linaro.org>
 
 $flavour = shift;
-if ($flavour=~/^\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
-else { while (($output=shift) && ($output!~/^\w[\w\-]*\.\w+$/)) {} }
+if ($flavour=~/\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
+else { while (($output=shift) && ($output!~/\w[\w\-]*\.\w+$/)) {} }
 
 if ($flavour && $flavour ne "void") {
     $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
@@ -731,6 +731,7 @@ $code.=<<___;
 .thumb
 #else
 .code   32
+# undef __thumb2__
 #endif
 
 .type	_bsaes_decrypt8,%function

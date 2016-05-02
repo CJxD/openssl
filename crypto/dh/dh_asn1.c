@@ -1,4 +1,3 @@
-/* dh_asn1.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -60,7 +59,7 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/bn.h>
-#include <openssl/dh.h>
+#include "dh_locl.h"
 #include <openssl/objects.h>
 #include <openssl/asn1t.h>
 
@@ -70,7 +69,7 @@ static int dh_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
 {
     if (operation == ASN1_OP_NEW_PRE) {
         *pval = (ASN1_VALUE *)DH_new();
-        if (*pval)
+        if (*pval != NULL)
             return 2;
         return 0;
     } else if (operation == ASN1_OP_FREE_PRE) {
@@ -85,7 +84,7 @@ ASN1_SEQUENCE_cb(DHparams, dh_cb) = {
         ASN1_SIMPLE(DH, p, BIGNUM),
         ASN1_SIMPLE(DH, g, BIGNUM),
         ASN1_OPT(DH, length, ZLONG),
-} static_ASN1_SEQUENCE_END_cb(DH, DHparams)
+} ASN1_SEQUENCE_END_cb(DH, DHparams)
 
 IMPLEMENT_ASN1_ENCODE_FUNCTIONS_const_fname(DH, DHparams, DHparams)
 
@@ -126,17 +125,17 @@ int i2d_int_dhx(const int_dhx942_dh *a, unsigned char **pp);
 
 IMPLEMENT_ASN1_ENCODE_FUNCTIONS_const_fname(int_dhx942_dh, DHxparams, int_dhx)
 
-/* Application leve function: read in X9.42 DH parameters into DH structure */
+/* Application public function: read in X9.42 DH parameters into DH structure */
 
 DH *d2i_DHxparams(DH **a, const unsigned char **pp, long length)
 {
     int_dhx942_dh *dhx = NULL;
     DH *dh = NULL;
     dh = DH_new();
-    if (!dh)
+    if (dh == NULL)
         return NULL;
     dhx = d2i_int_dhx(NULL, pp, length);
-    if (!dhx) {
+    if (dhx == NULL) {
         DH_free(dh);
         return NULL;
     }

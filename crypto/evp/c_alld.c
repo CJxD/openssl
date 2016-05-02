@@ -1,4 +1,3 @@
-/* crypto/evp/c_alld.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,10 +58,11 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/evp.h>
+#include <internal/evp_int.h>
 #include <openssl/pkcs12.h>
 #include <openssl/objects.h>
 
-void OpenSSL_add_all_digests(void)
+void openssl_add_all_digests_int(void)
 {
 #ifndef OPENSSL_NO_MD4
     EVP_add_digest(EVP_md4());
@@ -70,19 +70,11 @@ void OpenSSL_add_all_digests(void)
 #ifndef OPENSSL_NO_MD5
     EVP_add_digest(EVP_md5());
     EVP_add_digest_alias(SN_md5, "ssl3-md5");
+    EVP_add_digest(EVP_md5_sha1());
 #endif
     EVP_add_digest(EVP_sha1());
     EVP_add_digest_alias(SN_sha1, "ssl3-sha1");
     EVP_add_digest_alias(SN_sha1WithRSAEncryption, SN_sha1WithRSA);
-# ifndef OPENSSL_NO_DSA
-    EVP_add_digest(EVP_dss1());
-    EVP_add_digest_alias(SN_dsaWithSHA1, SN_dsaWithSHA1_2);
-    EVP_add_digest_alias(SN_dsaWithSHA1, "DSS1");
-    EVP_add_digest_alias(SN_dsaWithSHA1, "dss1");
-# endif
-# ifndef OPENSSL_NO_EC
-    EVP_add_digest(EVP_ecdsa());
-# endif
 #if !defined(OPENSSL_NO_MDC2) && !defined(OPENSSL_NO_DES)
     EVP_add_digest(EVP_mdc2());
 #endif
@@ -97,5 +89,9 @@ void OpenSSL_add_all_digests(void)
     EVP_add_digest(EVP_sha512());
 #ifndef OPENSSL_NO_WHIRLPOOL
     EVP_add_digest(EVP_whirlpool());
+#endif
+#ifndef OPENSSL_NO_BLAKE2
+    EVP_add_digest(EVP_blake2b512());
+    EVP_add_digest(EVP_blake2s256());
 #endif
 }

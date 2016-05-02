@@ -422,9 +422,6 @@ int smime_main(int argc, char **argv)
         goto end;
     }
 
-    if (!app_load_modules(NULL))
-        goto end;
-
     if (need_rand) {
         app_RAND_load_file(NULL, (inrand != NULL));
         if (inrand != NULL)
@@ -461,7 +458,7 @@ int smime_main(int argc, char **argv)
             goto end;
         while (*argv) {
             cert = load_cert(*argv, FORMAT_PEM,
-                             NULL, e, "recipient certificate file");
+                             "recipient certificate file");
             if (cert == NULL)
                 goto end;
             sk_X509_push(encerts, cert);
@@ -471,16 +468,16 @@ int smime_main(int argc, char **argv)
     }
 
     if (certfile) {
-        if ((other = load_certs(certfile, FORMAT_PEM, NULL,
-                                 e, "certificate file")) == NULL) {
+        if (!load_certs(certfile, &other, FORMAT_PEM, NULL,
+                        "certificate file")) {
             ERR_print_errors(bio_err);
             goto end;
         }
     }
 
     if (recipfile && (operation == SMIME_DECRYPT)) {
-        if ((recip = load_cert(recipfile, FORMAT_PEM, NULL,
-                                e, "recipient certificate file")) == NULL) {
+        if ((recip = load_cert(recipfile, FORMAT_PEM,
+                               "recipient certificate file")) == NULL) {
             ERR_print_errors(bio_err);
             goto end;
         }
@@ -575,8 +572,8 @@ int smime_main(int argc, char **argv)
         for (i = 0; i < sk_OPENSSL_STRING_num(sksigners); i++) {
             signerfile = sk_OPENSSL_STRING_value(sksigners, i);
             keyfile = sk_OPENSSL_STRING_value(skkeys, i);
-            signer = load_cert(signerfile, FORMAT_PEM, NULL,
-                               e, "signer certificate");
+            signer = load_cert(signerfile, FORMAT_PEM,
+                               "signer certificate");
             if (!signer)
                 goto end;
             key = load_key(keyfile, keyform, 0, passin, e, "signing key file");

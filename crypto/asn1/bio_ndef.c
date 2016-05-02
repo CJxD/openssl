@@ -1,4 +1,3 @@
-/* bio_ndef.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -65,7 +64,7 @@
 /*
  * The usage is quite simple, initialize an ASN1 structure, get a BIO from it
  * then any data written through the BIO will end up translated to
- * approptiate format on the fly. The data is streamed out and does *not*
+ * appropriate format on the fly. The data is streamed out and does *not*
  * need to be all held in memory at once. When the BIO is flushed the output
  * is finalized and any signatures etc written out. The BIO is a 'proper'
  * BIO and can handle non blocking I/O correctly. The usage is simple. The
@@ -113,14 +112,14 @@ BIO *BIO_new_NDEF(BIO *out, ASN1_VALUE *val, const ASN1_ITEM *it)
 
     out = BIO_push(asn_bio, out);
 
-    if (!ndef_aux || !asn_bio || !out)
+    if (ndef_aux == NULL || asn_bio == NULL || !out)
         goto err;
 
     BIO_asn1_set_prefix(asn_bio, ndef_prefix, ndef_prefix_free);
     BIO_asn1_set_suffix(asn_bio, ndef_suffix, ndef_suffix_free);
 
     /*
-     * Now let callback prepend any digest, cipher etc BIOs ASN1 structure
+     * Now let callback prepends any digest, cipher etc BIOs ASN1 structure
      * needs.
      */
 
@@ -160,7 +159,7 @@ static int ndef_prefix(BIO *b, unsigned char **pbuf, int *plen, void *parg)
 
     derlen = ASN1_item_ndef_i2d(ndef_aux->val, NULL, ndef_aux->it);
     p = OPENSSL_malloc(derlen);
-    if (!p)
+    if (p == NULL)
         return 0;
 
     ndef_aux->derbuf = p;
@@ -229,7 +228,7 @@ static int ndef_suffix(BIO *b, unsigned char **pbuf, int *plen, void *parg)
 
     derlen = ASN1_item_ndef_i2d(ndef_aux->val, NULL, ndef_aux->it);
     p = OPENSSL_malloc(derlen);
-    if (!p)
+    if (p == NULL)
         return 0;
 
     ndef_aux->derbuf = p;

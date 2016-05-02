@@ -1,4 +1,3 @@
-/* pmeth_fn.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2006.
@@ -325,7 +324,7 @@ int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer)
         return ret;
     }
 
-    CRYPTO_add(&peer->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    EVP_PKEY_up_ref(peer);
     return 1;
 }
 

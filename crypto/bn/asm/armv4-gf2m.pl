@@ -33,8 +33,8 @@
 # http://conradoplg.cryptoland.net/files/2010/12/mocrysen13.pdf
 
 $flavour = shift;
-if ($flavour=~/^\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
-else { while (($output=shift) && ($output!~/^\w[\w\-]*\.\w+$/)) {} }
+if ($flavour=~/\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
+else { while (($output=shift) && ($output!~/\w[\w\-]*\.\w+$/)) {} }
 
 if ($flavour && $flavour ne "void") {
     $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
@@ -51,7 +51,7 @@ $code=<<___;
 #include "arm_arch.h"
 
 .text
-#if defined(__thumb2__) && !defined(__APPLE__)
+#if defined(__thumb2__)
 .syntax	unified
 .thumb
 #else

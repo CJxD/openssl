@@ -19,16 +19,19 @@ int main(int argc, char *argv[])
 # include <openssl/rsa.h>
 
 # define SetKey \
-  key->n = BN_bin2bn(n, sizeof(n)-1, key->n); \
-  key->e = BN_bin2bn(e, sizeof(e)-1, key->e); \
-  key->d = BN_bin2bn(d, sizeof(d)-1, key->d); \
-  key->p = BN_bin2bn(p, sizeof(p)-1, key->p); \
-  key->q = BN_bin2bn(q, sizeof(q)-1, key->q); \
-  key->dmp1 = BN_bin2bn(dmp1, sizeof(dmp1)-1, key->dmp1); \
-  key->dmq1 = BN_bin2bn(dmq1, sizeof(dmq1)-1, key->dmq1); \
-  key->iqmp = BN_bin2bn(iqmp, sizeof(iqmp)-1, key->iqmp); \
-  memcpy(c, ctext_ex, sizeof(ctext_ex) - 1); \
-  return (sizeof(ctext_ex) - 1);
+    RSA_set0_key(key,                                           \
+                 BN_bin2bn(n, sizeof(n)-1, NULL),               \
+                 BN_bin2bn(e, sizeof(e)-1, NULL),               \
+                 BN_bin2bn(d, sizeof(d)-1, NULL));              \
+    RSA_set0_factors(key,                                       \
+                     BN_bin2bn(p, sizeof(p)-1, NULL),           \
+                     BN_bin2bn(q, sizeof(q)-1, NULL));          \
+    RSA_set0_crt_params(key,                                    \
+                        BN_bin2bn(dmp1, sizeof(dmp1)-1, NULL),  \
+                        BN_bin2bn(dmq1, sizeof(dmq1)-1, NULL),  \
+                        BN_bin2bn(iqmp, sizeof(iqmp)-1, NULL)); \
+    memcpy(c, ctext_ex, sizeof(ctext_ex) - 1);                  \
+    return (sizeof(ctext_ex) - 1);
 
 static int key1(RSA *key, unsigned char *c)
 {
@@ -222,8 +225,7 @@ int main(int argc, char *argv[])
     int num;
     int n;
 
-    CRYPTO_malloc_debug_init();
-    CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+    CRYPTO_set_mem_debug(1);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
     RAND_seed(rnd_seed, sizeof rnd_seed); /* or OAEP may fail */
@@ -244,7 +246,7 @@ int main(int argc, char *argv[])
             break;
         }
         if (v / 3 >= 1)
-            key->flags |= RSA_FLAG_NO_CONSTTIME;
+            RSA_set_flags(key, RSA_FLAG_NO_CONSTTIME);
 
         num = RSA_public_encrypt(plen, ptext_ex, ctext, key,
                                  RSA_PKCS1_PADDING);
@@ -325,15 +327,11 @@ int main(int argc, char *argv[])
         RSA_free(key);
     }
 
-    CRYPTO_cleanup_all_ex_data();
-    ERR_remove_thread_state(NULL);
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+    if (CRYPTO_mem_leaks_fp(stderr) <= 0)
+        err = 1;
+#endif
 
-    CRYPTO_mem_leaks_fp(stderr);
-
-# ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-# endif
     return err;
 }
 #endif

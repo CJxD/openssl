@@ -1,4 +1,3 @@
-/* p12_attr.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 1999.
@@ -60,6 +59,7 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/pkcs12.h>
+#include "p12_lcl.h"
 
 /* Add a local keyid to a safebag */
 
@@ -77,13 +77,9 @@ int PKCS12_add_localkeyid(PKCS12_SAFEBAG *bag, unsigned char *name,
 
 int PKCS8_add_keyusage(PKCS8_PRIV_KEY_INFO *p8, int usage)
 {
-    unsigned char us_val;
-    us_val = (unsigned char)usage;
-    if (X509at_add1_attr_by_NID(&p8->attributes, NID_key_usage,
-                                V_ASN1_BIT_STRING, &us_val, 1))
-        return 1;
-    else
-        return 0;
+    unsigned char us_val = (unsigned char)usage;
+    return PKCS8_pkey_add1_attr_by_NID(p8, NID_key_usage,
+                                       V_ASN1_BIT_STRING, &us_val, 1);
 }
 
 /* Add a friendlyname to a safebag */
@@ -130,10 +126,15 @@ char *PKCS12_get_friendlyname(PKCS12_SAFEBAG *bag)
 {
     ASN1_TYPE *atype;
 
-    if ((atype = PKCS12_get_attr(bag, NID_friendlyName)) == NULL)
+    if ((atype = PKCS12_SAFEBAG_get0_attr(bag, NID_friendlyName)) == NULL)
         return NULL;
     if (atype->type != V_ASN1_BMPSTRING)
         return NULL;
     return OPENSSL_uni2asc(atype->value.bmpstring->data,
                            atype->value.bmpstring->length);
+}
+
+STACK_OF(X509_ATTRIBUTE) *PKCS12_SAFEBAG_get0_attrs(PKCS12_SAFEBAG *bag)
+{
+    return bag->attrib;
 }

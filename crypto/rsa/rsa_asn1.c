@@ -1,4 +1,3 @@
-/* rsa_asn1.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
  * 2000.
@@ -60,9 +59,9 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/bn.h>
-#include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/asn1t.h>
+#include "rsa_locl.h"
 
 /* Override the default free and new methods */
 static int rsa_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
@@ -70,7 +69,7 @@ static int rsa_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
 {
     if (operation == ASN1_OP_NEW_PRE) {
         *pval = (ASN1_VALUE *)RSA_new();
-        if (*pval)
+        if (*pval != NULL)
             return 2;
         return 0;
     } else if (operation == ASN1_OP_FREE_PRE) {

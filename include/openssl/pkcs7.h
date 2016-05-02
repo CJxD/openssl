@@ -1,4 +1,3 @@
-/* crypto/pkcs7/pkcs7.h */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -100,7 +99,7 @@ typedef struct pkcs7_signer_info_st {
     EVP_PKEY *pkey;
 } PKCS7_SIGNER_INFO;
 
-DECLARE_STACK_OF(PKCS7_SIGNER_INFO)
+DEFINE_STACK_OF(PKCS7_SIGNER_INFO)
 
 typedef struct pkcs7_recip_info_st {
     ASN1_INTEGER *version;      /* version 0 */
@@ -110,7 +109,7 @@ typedef struct pkcs7_recip_info_st {
     X509 *cert;                 /* get the pub-key from this */
 } PKCS7_RECIP_INFO;
 
-DECLARE_STACK_OF(PKCS7_RECIP_INFO)
+DEFINE_STACK_OF(PKCS7_RECIP_INFO)
 
 typedef struct pkcs7_signed_st {
     ASN1_INTEGER *version;      /* version 1 */
@@ -197,7 +196,7 @@ typedef struct pkcs7_st {
     } d;
 } PKCS7;
 
-DECLARE_STACK_OF(PKCS7)
+DEFINE_STACK_OF(PKCS7)
 
 # define PKCS7_OP_SET_DETACHED_SIGNATURE 1
 # define PKCS7_OP_GET_DETACHED_SIGNATURE 2
@@ -238,6 +237,7 @@ DECLARE_STACK_OF(PKCS7)
 # define PKCS7_NOCRL             0x2000
 # define PKCS7_PARTIAL           0x4000
 # define PKCS7_REUSE_DIGEST      0x8000
+# define PKCS7_NO_DUAL_CONTENT   0x10000
 
 /* Flags: for compatibility with older code */
 

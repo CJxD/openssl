@@ -1,4 +1,3 @@
-/* v3_ncons.c */
 /*
  * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -121,7 +120,7 @@ static void *v2i_NAME_CONSTRAINTS(const X509V3_EXT_METHOD *method,
     GENERAL_SUBTREE *sub = NULL;
 
     ncons = NAME_CONSTRAINTS_new();
-    if (!ncons)
+    if (ncons == NULL)
         goto memerr;
     for (i = 0; i < sk_CONF_VALUE_num(nval); i++) {
         val = sk_CONF_VALUE_value(nval, i);
@@ -137,11 +136,13 @@ static void *v2i_NAME_CONSTRAINTS(const X509V3_EXT_METHOD *method,
         }
         tval.value = val->value;
         sub = GENERAL_SUBTREE_new();
+        if (sub == NULL)
+            goto memerr;
         if (!v2i_GENERAL_NAME_ex(sub->base, method, ctx, &tval, 1))
             goto err;
-        if (!*ptree)
+        if (*ptree == NULL)
             *ptree = sk_GENERAL_SUBTREE_new_null();
-        if (!*ptree || !sk_GENERAL_SUBTREE_push(*ptree, sub))
+        if (*ptree == NULL || !sk_GENERAL_SUBTREE_push(*ptree, sub))
             goto memerr;
         sub = NULL;
     }
@@ -404,7 +405,7 @@ static int nc_email(ASN1_IA5STRING *eml, ASN1_IA5STRING *base)
     const char *emlat = strchr(emlptr, '@');
     if (!emlat)
         return X509_V_ERR_UNSUPPORTED_NAME_SYNTAX;
-    /* Special case: inital '.' is RHS match */
+    /* Special case: initial '.' is RHS match */
     if (!baseat && (*baseptr == '.')) {
         if (eml->length > base->length) {
             emlptr += eml->length - base->length;
@@ -464,7 +465,7 @@ static int nc_uri(ASN1_IA5STRING *uri, ASN1_IA5STRING *base)
     if (hostlen == 0)
         return X509_V_ERR_UNSUPPORTED_NAME_SYNTAX;
 
-    /* Special case: inital '.' is RHS match */
+    /* Special case: initial '.' is RHS match */
     if (*baseptr == '.') {
         if (hostlen > base->length) {
             p = hostptr + hostlen - base->length;

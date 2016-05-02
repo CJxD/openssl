@@ -1,4 +1,3 @@
-/* evp_cnf.c */
 /*
  * Written by Stephen Henson (steve@openssl.org) for the OpenSSL project
  * 2007.
@@ -62,7 +61,6 @@
 #include <openssl/crypto.h>
 #include "internal/cryptlib.h"
 #include <openssl/conf.h>
-#include <openssl/dso.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 

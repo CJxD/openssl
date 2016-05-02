@@ -1,4 +1,3 @@
-/* crypto/des/destest.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -719,10 +718,6 @@ int main(int argc, char *argv[])
         printf("fast crypt error, %s should be yA1Rp/1hZXIJk\n", str);
         err = 1;
     }
-# ifdef OPENSSL_SYS_NETWARE
-    if (err)
-        printf("ERROR: %d\n", err);
-# endif
     printf("\n");
     return (err);
 }

@@ -72,8 +72,8 @@
 # example...
 
 $flavour = shift;
-if ($flavour=~/^\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
-else { while (($output=shift) && ($output!~/^\w[\w\-]*\.\w+$/)) {} }
+if ($flavour=~/\w[\w\-]*\.\w+$/) { $output=$flavour; undef $flavour; }
+else { while (($output=shift) && ($output!~/\w[\w\-]*\.\w+$/)) {} }
 
 if ($flavour && $flavour ne "void") {
     $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
@@ -136,14 +136,14 @@ $code=<<___;
 #include "arm_arch.h"
 
 .text
-#if defined(__thumb2__) && !defined(__APPLE__)
+#if defined(__thumb2__)
 .syntax	unified
 .thumb
 #else
 .code	32
 #endif
 
-#ifdef  __APPLE__
+#ifdef  __clang__
 #define ldrplb  ldrbpl
 #define ldrneb  ldrbne
 #endif

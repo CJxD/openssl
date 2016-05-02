@@ -1,4 +1,3 @@
-/* crypto/ec/ec2_smpl.c */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
  *
@@ -86,6 +85,7 @@ const EC_METHOD *EC_GF2m_simple_method(void)
         ec_GF2m_simple_group_set_curve,
         ec_GF2m_simple_group_get_curve,
         ec_GF2m_simple_group_get_degree,
+        ec_group_simple_order_bits,
         ec_GF2m_simple_group_check_discriminant,
         ec_GF2m_simple_point_init,
         ec_GF2m_simple_point_finish,
@@ -118,7 +118,16 @@ const EC_METHOD *EC_GF2m_simple_method(void)
         ec_GF2m_simple_field_div,
         0 /* field_encode */ ,
         0 /* field_decode */ ,
-        0                       /* field_set_to_one */
+        0,                      /* field_set_to_one */
+        ec_key_simple_priv2oct,
+        ec_key_simple_oct2priv,
+        0, /* set private */
+        ec_key_simple_generate_key,
+        ec_key_simple_check_key,
+        ec_key_simple_generate_public_key,
+        0, /* keycopy */
+        0, /* keyfinish */
+        ecdh_simple_compute_key
     };
 
     return &ret;
@@ -134,7 +143,7 @@ int ec_GF2m_simple_group_init(EC_GROUP *group)
     group->a = BN_new();
     group->b = BN_new();
 
-    if (!group->field || !group->a || !group->b) {
+    if (group->field == NULL || group->a == NULL || group->b == NULL) {
         BN_free(group->field);
         BN_free(group->a);
         BN_free(group->b);
@@ -326,7 +335,7 @@ int ec_GF2m_simple_point_init(EC_POINT *point)
     point->Y = BN_new();
     point->Z = BN_new();
 
-    if (!point->X || !point->Y || !point->Z) {
+    if (point->X == NULL || point->Y == NULL || point->Z == NULL) {
         BN_free(point->X);
         BN_free(point->Y);
         BN_free(point->Z);
@@ -742,6 +751,7 @@ int ec_GF2m_simple_make_affine(const EC_GROUP *group, EC_POINT *point,
         goto err;
     if (!BN_one(point->Z))
         goto err;
+    point->Z_is_one = 1;
 
     ret = 1;
 

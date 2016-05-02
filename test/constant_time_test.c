@@ -1,4 +1,3 @@
-/* crypto/constant_time_test.c */
 /*-
  * Utilities for constant-time cryptography.
  *
@@ -45,6 +44,7 @@
  */
 
 #include "internal/constant_time_locl.h"
+#include "e_os.h"
 
 #include <limits.h>
 #include <stdio.h>

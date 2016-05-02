@@ -1,4 +1,3 @@
-/* crypto/bn/bn_mont.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -327,9 +326,9 @@ BN_MONT_CTX *BN_MONT_CTX_new(void)
 void BN_MONT_CTX_init(BN_MONT_CTX *ctx)
 {
     ctx->ri = 0;
-    BN_init(&(ctx->RR));
-    BN_init(&(ctx->N));
-    BN_init(&(ctx->Ni));
+    bn_init(&(ctx->RR));
+    bn_init(&(ctx->N));
+    bn_init(&(ctx->Ni));
     ctx->n0[0] = ctx->n0[1] = 0;
     ctx->flags = 0;
 }
@@ -367,7 +366,7 @@ int BN_MONT_CTX_set(BN_MONT_CTX *mont, const BIGNUM *mod, BN_CTX *ctx)
         BIGNUM tmod;
         BN_ULONG buf[2];
 
-        BN_init(&tmod);
+        bn_init(&tmod);
         tmod.d = buf;
         tmod.dmax = 2;
         tmod.neg = 0;
@@ -497,14 +496,14 @@ BN_MONT_CTX *BN_MONT_CTX_copy(BN_MONT_CTX *to, BN_MONT_CTX *from)
     return (to);
 }
 
-BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, int lock,
+BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, CRYPTO_RWLOCK *lock,
                                     const BIGNUM *mod, BN_CTX *ctx)
 {
     BN_MONT_CTX *ret;
 
-    CRYPTO_r_lock(lock);
+    CRYPTO_THREAD_read_lock(lock);
     ret = *pmont;
-    CRYPTO_r_unlock(lock);
+    CRYPTO_THREAD_unlock(lock);
     if (ret)
         return ret;
 
@@ -517,7 +516,7 @@ BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, int lock,
      * (the losers throw away the work they've done).
      */
     ret = BN_MONT_CTX_new();
-    if (!ret)
+    if (ret == NULL)
         return NULL;
     if (!BN_MONT_CTX_set(ret, mod, ctx)) {
         BN_MONT_CTX_free(ret);
@@ -525,12 +524,12 @@ BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, int lock,
     }
 
     /* The locked compare-and-set, after the local work is done. */
-    CRYPTO_w_lock(lock);
+    CRYPTO_THREAD_write_lock(lock);
     if (*pmont) {
         BN_MONT_CTX_free(ret);
         ret = *pmont;
     } else
         *pmont = ret;
-    CRYPTO_w_unlock(lock);
+    CRYPTO_THREAD_unlock(lock);
     return ret;
 }

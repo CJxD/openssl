@@ -1,4 +1,3 @@
-/* crypto/ts/ts.h */
 /*
  * Written by Zoltan Glozik (zglozik@opentsa.org) for the OpenSSL project
  * 2002, 2003, 2004.
@@ -61,6 +60,8 @@
 # define HEADER_TS_H
 
 # include <openssl/opensslconf.h>
+
+# ifndef OPENSSL_NO_TS
 # include <openssl/symhacks.h>
 # include <openssl/buffer.h>
 # include <openssl/evp.h>
@@ -68,22 +69,12 @@
 # include <openssl/stack.h>
 # include <openssl/asn1.h>
 # include <openssl/safestack.h>
-
-# ifndef OPENSSL_NO_RSA
-#  include <openssl/rsa.h>
-# endif
-
-# ifndef OPENSSL_NO_DSA
-#  include <openssl/dsa.h>
-# endif
-
-# ifndef OPENSSL_NO_DH
-#  include <openssl/dh.h>
-# endif
-
-#ifdef  __cplusplus
+# include <openssl/rsa.h>
+# include <openssl/dsa.h>
+# include <openssl/dh.h>
+# ifdef  __cplusplus
 extern "C" {
-#endif
+# endif
 
 # ifdef WIN32
 /* Under Win32 this is defined in wincrypt.h */
@@ -122,7 +113,7 @@ typedef struct ESS_issuer_serial ESS_ISSUER_SERIAL;
 typedef struct ESS_cert_id ESS_CERT_ID;
 typedef struct ESS_signing_cert ESS_SIGNING_CERT;
 
-DECLARE_STACK_OF(ESS_CERT_ID)
+DEFINE_STACK_OF(ESS_CERT_ID)
 
 typedef struct TS_resp_st TS_RESP;
 
@@ -225,6 +216,11 @@ int TS_REQ_set_version(TS_REQ *a, long version);
 long TS_REQ_get_version(const TS_REQ *a);
 
 int TS_STATUS_INFO_set_status(TS_STATUS_INFO *a, int i);
+ASN1_INTEGER *TS_STATUS_INFO_get0_status(TS_STATUS_INFO *a);
+
+STACK_OF(ASN1_UTF8STRING) *TS_STATUS_INFO_get0_text(TS_STATUS_INFO *a);
+
+ASN1_BIT_STRING *TS_STATUS_INFO_get0_failure_info(TS_STATUS_INFO *a);
 
 int TS_REQ_set_msg_imprint(TS_REQ *a, TS_MSG_IMPRINT *msg_imprint);
 TS_MSG_IMPRINT *TS_REQ_get_msg_imprint(TS_REQ *a);
@@ -359,7 +355,7 @@ typedef int (*TS_extension_cb) (struct TS_resp_ctx *, X509_EXTENSION *,
 
 typedef struct TS_resp_ctx TS_RESP_CTX;
 
-DECLARE_STACK_OF(EVP_MD)
+DEFINE_STACK_OF(EVP_MD)
 
 /* Creates a response context that can be used for generating responses. */
 TS_RESP_CTX *TS_RESP_CTX_new(void);
@@ -370,6 +366,9 @@ int TS_RESP_CTX_set_signer_cert(TS_RESP_CTX *ctx, X509 *signer);
 
 /* This parameter must be set. */
 int TS_RESP_CTX_set_signer_key(TS_RESP_CTX *ctx, EVP_PKEY *key);
+
+int TS_RESP_CTX_set_signer_digest(TS_RESP_CTX *ctx,
+                                  const EVP_MD *signer_digest);
 
 /* This parameter must be set. */
 int TS_RESP_CTX_set_def_policy(TS_RESP_CTX *ctx, ASN1_OBJECT *def_policy);
@@ -554,9 +553,11 @@ EVP_PKEY *TS_CONF_load_key(const char *file, const char *pass);
 const char *TS_CONF_get_tsa_section(CONF *conf, const char *section);
 int TS_CONF_set_serial(CONF *conf, const char *section, TS_serial_cb cb,
                        TS_RESP_CTX *ctx);
+#ifndef OPENSSL_NO_ENGINE
 int TS_CONF_set_crypto_device(CONF *conf, const char *section,
                               const char *device);
 int TS_CONF_set_default_engine(const char *name);
+#endif
 int TS_CONF_set_signer_cert(CONF *conf, const char *section,
                             const char *cert, TS_RESP_CTX *ctx);
 int TS_CONF_set_certs(CONF *conf, const char *section, const char *certs,
@@ -564,6 +565,8 @@ int TS_CONF_set_certs(CONF *conf, const char *section, const char *certs,
 int TS_CONF_set_signer_key(CONF *conf, const char *section,
                            const char *key, const char *pass,
                            TS_RESP_CTX *ctx);
+int TS_CONF_set_signer_digest(CONF *conf, const char *section,
+                               const char *md, TS_RESP_CTX *ctx);
 int TS_CONF_set_def_policy(CONF *conf, const char *section,
                            const char *policy, TS_RESP_CTX *ctx);
 int TS_CONF_set_policies(CONF *conf, const char *section, TS_RESP_CTX *ctx);
@@ -685,7 +688,9 @@ void ERR_load_TS_strings(void);
 # define TS_R_VAR_LOOKUP_FAILURE                          136
 # define TS_R_WRONG_CONTENT_TYPE                          114
 
-#ifdef  __cplusplus
+# ifdef  __cplusplus
 }
-#endif
+# endif
+# endif
+
 #endif

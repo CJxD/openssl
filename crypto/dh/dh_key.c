@@ -1,4 +1,3 @@
-/* crypto/dh/dh_key.c */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -59,7 +58,7 @@
 #include <stdio.h>
 #include "internal/cryptlib.h"
 #include <openssl/rand.h>
-#include <openssl/dh.h>
+#include "dh_locl.h"
 #include "internal/bn_int.h"
 
 static int generate_key(DH *dh);
@@ -141,7 +140,7 @@ static int generate_key(DH *dh)
 
     if (dh->flags & DH_FLAG_CACHE_MONT_P) {
         mont = BN_MONT_CTX_set_locked(&dh->method_mont_p,
-                                      CRYPTO_LOCK_DH, dh->p, ctx);
+                                      dh->lock, dh->p, ctx);
         if (!mont)
             goto err;
     }
@@ -167,14 +166,18 @@ static int generate_key(DH *dh)
 
         if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0) {
             local_prk = prk = BN_new();
+            if (local_prk == NULL)
+                goto err;
             BN_with_flags(prk, priv_key, BN_FLG_CONSTTIME);
-        } else
+        } else {
             prk = priv_key;
+        }
 
         if (!dh->meth->bn_mod_exp(dh, pub_key, dh->g, prk, dh->p, ctx, mont)) {
             BN_free(local_prk);
             goto err;
         }
+        /* We MUST free local_prk before any further use of priv_key */
         BN_free(local_prk);
     }
 
@@ -219,7 +222,7 @@ static int compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh)
 
     if (dh->flags & DH_FLAG_CACHE_MONT_P) {
         mont = BN_MONT_CTX_set_locked(&dh->method_mont_p,
-                                      CRYPTO_LOCK_DH, dh->p, ctx);
+                                      dh->lock, dh->p, ctx);
         if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0) {
             /* XXX */
             BN_set_flags(dh->priv_key, BN_FLG_CONSTTIME);
@@ -254,7 +257,7 @@ static int dh_bn_mod_exp(const DH *dh, BIGNUM *r,
 {
     /*
      * If a is only one word long and constant time is false, use the faster
-     * exponenentiation function.
+     * exponentiation function.
      */
     if (bn_get_top(a) == 1 && ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) != 0)) {
         BN_ULONG A = bn_get_words(a)[0];

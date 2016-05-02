@@ -55,19 +55,22 @@
  * Hudson (tjh@cryptsoft.com).
  *
  */
-#include <openssl/opensslconf.h>
 
-#ifndef OPENSSL_NO_SRP
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <openssl/conf.h>
-#include <openssl/bio.h>
-#include <openssl/err.h>
-#include <openssl/txt_db.h>
-#include <openssl/buffer.h>
-#include <openssl/srp.h>
-#include "apps.h"
+#include <openssl/opensslconf.h>
+#ifdef OPENSSL_NO_SRP
+NON_EMPTY_TRANSLATION_UNIT
+#else
+
+# include <stdio.h>
+# include <stdlib.h>
+# include <string.h>
+# include <openssl/conf.h>
+# include <openssl/bio.h>
+# include <openssl/err.h>
+# include <openssl/txt_db.h>
+# include <openssl/buffer.h>
+# include <openssl/srp.h>
+# include "apps.h"
 
 # define BASE_SECTION    "srp"
 # define CONFIG_FILE "openssl.cnf"
@@ -253,7 +256,6 @@ OPTIONS srp_options[] = {
 int srp_main(int argc, char **argv)
 {
     CA_DB *db = NULL;
-    DB_ATTR db_attr;
     CONF *conf = NULL;
     int gNindex = -1, maxgN = -1, ret = 1, errors = 0, verbose = 0, i;
     int doupdatedb = 0, mode = OPT_ERR;
@@ -365,7 +367,7 @@ int srp_main(int argc, char **argv)
             if (verbose)
                 BIO_printf(bio_err,
                            "trying to read " ENV_DEFAULT_SRP
-                           " in \" BASE_SECTION \"\n");
+                           " in " BASE_SECTION "\n");
 
             section = NCONF_get_string(conf, BASE_SECTION, ENV_DEFAULT_SRP);
             if (section == NULL) {
@@ -398,7 +400,7 @@ int srp_main(int argc, char **argv)
         BIO_printf(bio_err, "Trying to read SRP verifier file \"%s\"\n",
                    srpvfile);
 
-    db = load_index(srpvfile, &db_attr);
+    db = load_index(srpvfile, NULL);
     if (db == NULL)
         goto end;
 
@@ -486,9 +488,9 @@ int srp_main(int argc, char **argv)
                     errors++;
                     goto end;
                 }
-                row[DB_srpid] = BUF_strdup(user);
-                row[DB_srptype] = BUF_strdup("v");
-                row[DB_srpgN] = BUF_strdup(gNid);
+                row[DB_srpid] = OPENSSL_strdup(user);
+                row[DB_srptype] = OPENSSL_strdup("v");
+                row[DB_srpgN] = OPENSSL_strdup(gNid);
 
                 if ((row[DB_srpid] == NULL)
                     || (row[DB_srpgN] == NULL)
@@ -496,7 +498,7 @@ int srp_main(int argc, char **argv)
                     || (row[DB_srpverifier] == NULL)
                     || (row[DB_srpsalt] == NULL)
                     || (userinfo
-                        && ((row[DB_srpinfo] = BUF_strdup(userinfo)) == NULL))
+                        && ((row[DB_srpinfo] = OPENSSL_strdup(userinfo)) == NULL))
                     || !update_index(db, row)) {
                     OPENSSL_free(row[DB_srpid]);
                     OPENSSL_free(row[DB_srpgN]);
@@ -571,7 +573,7 @@ int srp_main(int argc, char **argv)
                     }
 
                     row[DB_srptype][0] = 'v';
-                    row[DB_srpgN] = BUF_strdup(gNid);
+                    row[DB_srpgN] = OPENSSL_strdup(gNid);
 
                     if (row[DB_srpid] == NULL
                         || row[DB_srpgN] == NULL
@@ -579,7 +581,7 @@ int srp_main(int argc, char **argv)
                         || row[DB_srpverifier] == NULL
                         || row[DB_srpsalt] == NULL
                         || (userinfo
-                            && ((row[DB_srpinfo] = BUF_strdup(userinfo))
+                            && ((row[DB_srpinfo] = OPENSSL_strdup(userinfo))
                                 == NULL)))
                         goto end;
 
@@ -650,14 +652,6 @@ int srp_main(int argc, char **argv)
         app_RAND_write_file(randfile);
     NCONF_free(conf);
     free_index(db);
-    OBJ_cleanup();
     return (ret);
 }
-
-#else
-
-# if PEDANTIC
-static void *dummy = &dummy;
-# endif
-
 #endif

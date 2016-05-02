@@ -1,4 +1,3 @@
-/* crypto/ec/ecp_smpl.c */
 /*
  * Includes code written by Lenka Fibikova <fibikova@exp-math.uni-essen.de>
  * for the OpenSSL project. Includes code written by Bodo Moeller for the
@@ -80,6 +79,7 @@ const EC_METHOD *EC_GFp_simple_method(void)
         ec_GFp_simple_group_set_curve,
         ec_GFp_simple_group_get_curve,
         ec_GFp_simple_group_get_degree,
+        ec_group_simple_order_bits,
         ec_GFp_simple_group_check_discriminant,
         ec_GFp_simple_point_init,
         ec_GFp_simple_point_finish,
@@ -107,7 +107,16 @@ const EC_METHOD *EC_GFp_simple_method(void)
         0 /* field_div */ ,
         0 /* field_encode */ ,
         0 /* field_decode */ ,
-        0                       /* field_set_to_one */
+        0,                      /* field_set_to_one */
+        ec_key_simple_priv2oct,
+        ec_key_simple_oct2priv,
+        0, /* set private */
+        ec_key_simple_generate_key,
+        ec_key_simple_check_key,
+        ec_key_simple_generate_public_key,
+        0, /* keycopy */
+        0, /* keyfinish */
+        ecdh_simple_compute_key
     };
 
     return &ret;
@@ -132,7 +141,7 @@ int ec_GFp_simple_group_init(EC_GROUP *group)
     group->field = BN_new();
     group->a = BN_new();
     group->b = BN_new();
-    if (!group->field || !group->a || !group->b) {
+    if (group->field == NULL || group->a == NULL || group->b == NULL) {
         BN_free(group->field);
         BN_free(group->a);
         BN_free(group->b);
@@ -359,7 +368,7 @@ int ec_GFp_simple_point_init(EC_POINT *point)
     point->Z = BN_new();
     point->Z_is_one = 0;
 
-    if (!point->X || !point->Y || !point->Z) {
+    if (point->X == NULL || point->Y == NULL || point->Z == NULL) {
         BN_free(point->X);
         BN_free(point->Y);
         BN_free(point->Z);

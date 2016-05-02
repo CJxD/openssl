@@ -55,9 +55,11 @@
  * [including the GNU Public Licence.]
  */
 
-#include <openssl/opensslconf.h> /* for OPENSSL_NO_DSA */
+#include <openssl/opensslconf.h>
+#ifdef OPENSSL_NO_DSA
+NON_EMPTY_TRANSLATION_UNIT
+#else
 
-#ifndef OPENSSL_NO_DSA
 # include <stdio.h>
 # include <stdlib.h>
 # include <time.h>
@@ -86,7 +88,7 @@ static int dsa_cb(int p, int n, BN_GENCB *cb);
 typedef enum OPTION_choice {
     OPT_ERR = -1, OPT_EOF = 0, OPT_HELP,
     OPT_INFORM, OPT_OUTFORM, OPT_IN, OPT_OUT, OPT_TEXT, OPT_C,
-    OPT_NOOUT, OPT_GENKEY, OPT_RAND, OPT_NON_FIPS_ALLOW, OPT_ENGINE,
+    OPT_NOOUT, OPT_GENKEY, OPT_RAND, OPT_ENGINE,
     OPT_TIMEBOMB
 } OPTION_CHOICE;
 
@@ -101,7 +103,6 @@ OPTIONS dsaparam_options[] = {
     {"noout", OPT_NOOUT, '-', "No output"},
     {"genkey", OPT_GENKEY, '-', "Generate a DSA key"},
     {"rand", OPT_RAND, 's', "Files to use for random number input"},
-    {"non-fips-allow", OPT_NON_FIPS_ALLOW, '-'},
 # ifdef GENCB_TEST
     {"timebomb", OPT_TIMEBOMB, 'p', "Interrupt keygen after 'pnum' seconds"},
 # endif
@@ -116,7 +117,7 @@ int dsaparam_main(int argc, char **argv)
     DSA *dsa = NULL;
     BIO *in = NULL, *out = NULL;
     BN_GENCB *cb = NULL;
-    int numbits = -1, num = 0, genkey = 0, need_rand = 0, non_fips_allow = 0;
+    int numbits = -1, num = 0, genkey = 0, need_rand = 0;
     int informat = FORMAT_PEM, outformat = FORMAT_PEM, noout = 0, C = 0;
     int ret = 1, i, text = 0, private = 0;
 # ifdef GENCB_TEST
@@ -175,19 +176,13 @@ int dsaparam_main(int argc, char **argv)
         case OPT_NOOUT:
             noout = 1;
             break;
-        case OPT_NON_FIPS_ALLOW:
-            non_fips_allow = 1;
-            break;
         }
     }
     argc = opt_num_rest();
     argv = opt_rest();
 
-    if (!app_load_modules(NULL))
-        goto end;
-
     if (argc == 1) {
-        if (!opt_int(argv[0], &num))
+        if (!opt_int(argv[0], &num) || num < 0)
             goto end;
         /* generate a key */
         numbits = num;
@@ -211,19 +206,17 @@ int dsaparam_main(int argc, char **argv)
 
     if (numbits > 0) {
         cb = BN_GENCB_new();
-        if (!cb) {
+        if (cb == NULL) {
             BIO_printf(bio_err, "Error allocating BN_GENCB object\n");
             goto end;
         }
         BN_GENCB_set(cb, dsa_cb, bio_err);
         assert(need_rand);
         dsa = DSA_new();
-        if (!dsa) {
+        if (dsa == NULL) {
             BIO_printf(bio_err, "Error allocating DSA object\n");
             goto end;
         }
-        if (non_fips_allow)
-            dsa->flags |= DSA_FLAG_NON_FIPS_ALLOW;
         BIO_printf(bio_err, "Generating DSA parameters, %d bit long prime\n",
                    num);
         BIO_printf(bio_err, "This could take some time\n");
@@ -270,14 +263,20 @@ int dsaparam_main(int argc, char **argv)
     }
 
     if (C) {
-        int len = BN_num_bytes(dsa->p);
-        int bits_p = BN_num_bits(dsa->p);
-        unsigned char *data = app_malloc(len + 20, "BN space");
+        BIGNUM *p = NULL, *q = NULL, *g = NULL;
+        unsigned char *data;
+        int len, bits_p;
+
+        DSA_get0_pqg(dsa, &p, &q, &g);
+        len = BN_num_bytes(p);
+        bits_p = BN_num_bits(p);
+
+        data = app_malloc(len + 20, "BN space");
 
         BIO_printf(bio_out, "DSA *get_dsa%d()\n{\n", bits_p);
-        print_bignum_var(bio_out, dsa->p, "dsap", len, data);
-        print_bignum_var(bio_out, dsa->q, "dsaq", len, data);
-        print_bignum_var(bio_out, dsa->g, "dsag", len, data);
+        print_bignum_var(bio_out, p, "dsap", len, data);
+        print_bignum_var(bio_out, q, "dsaq", len, data);
+        print_bignum_var(bio_out, g, "dsag", len, data);
         BIO_printf(bio_out, "    DSA *dsa = DSA_new();\n"
                             "\n");
         BIO_printf(bio_out, "    if (dsa == NULL)\n"
@@ -312,8 +311,6 @@ int dsaparam_main(int argc, char **argv)
         assert(need_rand);
         if ((dsakey = DSAparams_dup(dsa)) == NULL)
             goto end;
-        if (non_fips_allow)
-            dsakey->flags |= DSA_FLAG_NON_FIPS_ALLOW;
         if (!DSA_generate_key(dsakey)) {
             ERR_print_errors(bio_err);
             DSA_free(dsakey);
@@ -358,10 +355,4 @@ static int dsa_cb(int p, int n, BN_GENCB *cb)
 # endif
     return 1;
 }
-#else                           /* !OPENSSL_NO_DSA */
-
-# if PEDANTIC
-static void *dummy = &dummy;
-# endif
-
 #endif

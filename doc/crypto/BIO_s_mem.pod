@@ -9,15 +9,15 @@ BIO_get_mem_ptr, BIO_new_mem_buf - memory BIO
 
  #include <openssl/bio.h>
 
- BIO_METHOD *	BIO_s_mem(void);
- BIO_METHOD *	BIO_s_secmem(void);
+ const BIO_METHOD *	BIO_s_mem(void);
+ const BIO_METHOD *	BIO_s_secmem(void);
 
  BIO_set_mem_eof_return(BIO *b,int v)
  long BIO_get_mem_data(BIO *b, char **pp)
  BIO_set_mem_buf(BIO *b,BUF_MEM *bm,int c)
  BIO_get_mem_ptr(BIO *b,BUF_MEM **pp)
 
- BIO *BIO_new_mem_buf(void *buf, int len);
+ BIO *BIO_new_mem_buf(const void *buf, int len);
 
 =head1 DESCRIPTION
 
@@ -39,9 +39,10 @@ Memory BIOs support BIO_gets() and BIO_puts().
 If the BIO_CLOSE flag is set when a memory BIO is freed then the underlying
 BUF_MEM structure is also freed.
 
-Calling BIO_reset() on a read write memory BIO clears any data in it. On a
-read only BIO it restores the BIO to its original state and the read only
-data can be read again.
+Calling BIO_reset() on a read write memory BIO clears any data in it if the
+flag BIO_FLAGS_NONCLEAR_RST is not set. On a read only BIO or if the flag
+BIO_FLAGS_NONCLEAR_RST is set it restores the BIO to its original state and 
+the data can be read again.
 
 BIO_eof() is true if no data is in the BIO.
 
@@ -65,7 +66,7 @@ BIO_get_mem_ptr() places the underlying BUF_MEM structure in B<pp>. It is
 a macro.
 
 BIO_new_mem_buf() creates a memory BIO using B<len> bytes of data at B<buf>,
-if B<len> is -1 then the B<buf> is assumed to be null terminated and its
+if B<len> is -1 then the B<buf> is assumed to be nul terminated and its
 length is determined by B<strlen>. The BIO is set to a read only state and
 as a result cannot be written to. This is useful when some data needs to be
 made available from a static area of memory in the form of a BIO. The
@@ -89,12 +90,6 @@ give undefined results, including perhaps a program crash.
 =head1 BUGS
 
 There should be an option to set the maximum size of a memory BIO.
-
-There should be a way to "rewind" a read write BIO without destroying
-its contents.
-
-The copying operation should not occur after every small read of a large BIO
-to improve efficiency.
 
 =head1 EXAMPLE
 
